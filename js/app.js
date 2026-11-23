@@ -10,7 +10,7 @@ import {
   globalStats, gameStats, playerStats, filterPlays, PERIODS, autoRanks, isComp, MIN_SAMPLE, monthsBack,
 } from "./stats.js";
 
-const VERSION = "1.0.0 (lot 1)";
+const VERSION = "1.0.1 (lot 1)";
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
@@ -276,8 +276,7 @@ function viewPlays() {
   const q = S.ui.playQuery.trim().toLowerCase();
   let plays = playsSorted();
   if (q) plays = plays.filter((p) => (game(p.game_id)?.name || "").toLowerCase().includes(q)
-    || p.players.some((x) => (player(x.player_id)?.name || "").toLowerCase().includes(q))
-    || (p.location || "").toLowerCase().includes(q));
+    || p.players.some((x) => (player(x.player_id)?.name || "").toLowerCase().includes(q)));
   const groups = new Map();
   plays.forEach((p) => {
     const k = p.played_at.slice(0, 7);
@@ -285,7 +284,7 @@ function viewPlays() {
     groups.get(k).push(p);
   });
   return header("Parties", { sub: plural(S.data.plays.length, "partie enregistrée", "parties enregistrées") }) + `
-    <div class="search">${icon("search", 18)}<input type="search" placeholder="Jeu, joueur ou lieu" value="${esc(S.ui.playQuery)}" data-input="playQuery" aria-label="Rechercher une partie"></div>
+    <div class="search">${icon("search", 18)}<input type="search" placeholder="Jeu ou joueur" value="${esc(S.ui.playQuery)}" data-input="playQuery" aria-label="Rechercher une partie"></div>
     ${plays.length ? [...groups.entries()].map(([ym, ps]) => `<section class="group">
       <h2 class="group-h">${monthLabel(ym)} <span class="muted">· ${ps.length}</span></h2>
       <div class="list">${ps.map(playCard).join("")}</div></section>`).join("")
@@ -323,7 +322,6 @@ function viewPlay(id) {
   return header(g?.name || "Jeu supprimé", { back: "#/plays", actions, sub: `${fmtDate(p.played_at)} · ${MODES[p.mode]}${p.is_learning ? " · Apprentissage" : ""}` }) + `
     <section class="panel">${results}</section>
     <section class="panel facts">
-      ${p.location ? `<div>${icon("pin", 16)} ${esc(p.location)}</div>` : ""}
       ${p.duration_min ? `<div>${icon("clock", 16)} ${p.duration_min} min</div>` : ""}
       ${exps.length ? `<div>${icon("puzzle", 16)} ${exps.map((e) => esc(e.name)).join(", ")}</div>` : ""}
       ${p.notes ? `<div class="note">${esc(p.notes)}</div>` : ""}
@@ -336,7 +334,7 @@ function viewPlay(id) {
     </section>`;
 }
 
-const FIELD_LABELS = { game_id: "Jeu", played_at: "Date", mode: "Mode", coop_result: "Résultat", is_learning: "Apprentissage", duration_min: "Durée", location: "Lieu", notes: "Commentaire" };
+const FIELD_LABELS = { game_id: "Jeu", played_at: "Date", mode: "Mode", coop_result: "Résultat", is_learning: "Apprentissage", duration_min: "Durée", notes: "Commentaire" };
 function fieldValue(k, v) {
   if (v == null || v === "") return "—";
   if (k === "game_id") return game(v)?.name || "jeu supprimé";
@@ -408,12 +406,11 @@ async function loadDeleted() {
 
 // ---------- Partie : formulaire -----------------------------------------
 function newForm(query) {
-  const recent = playsSorted()[0];
   const gid = query.get("game") || "";
   const g = gid && game(gid);
   return {
     id: null, game_id: g ? g.id : "", played_at: today(), mode: g ? g.default_mode : "competitive",
-    coop_result: "", is_learning: false, duration_min: "", location: recent?.location || "", notes: "",
+    coop_result: "", is_learning: false, duration_min: "", notes: "",
     expansions: [], players: [], teams: [{ name: "Équipe 1", score: "", rank: "" }, { name: "Équipe 2", score: "", rank: "" }],
     manual: false,
   };
@@ -426,7 +423,7 @@ function formFromPlay(p) {
   }) : [{ name: "Équipe 1", score: "", rank: "" }, { name: "Équipe 2", score: "", rank: "" }];
   return {
     id: p.id, game_id: p.game_id, played_at: p.played_at, mode: p.mode, coop_result: p.coop_result || "",
-    is_learning: !!p.is_learning, duration_min: p.duration_min ?? "", location: p.location || "", notes: p.notes || "",
+    is_learning: !!p.is_learning, duration_min: p.duration_min ?? "", location: p.location || null, notes: p.notes || "",
     expansions: [...(p.expansions || [])],
     players: p.players.map((x) => ({ player_id: x.player_id, score: x.score ?? "", rank: x.rank ?? "", team: x.team || "" })),
     teams, manual: true,
@@ -517,8 +514,6 @@ function viewPlayForm(id, query) {
       ${f.mode === "competitive" && rule !== "none" ? `<p class="hint" id="rank-hint"></p>` : ""}
     </fieldset>` : ""}
     <label class="check"><input type="checkbox" data-f="is_learning" ${f.is_learning ? "checked" : ""}> Partie d'apprentissage <span class="muted small">(exclue des victoires)</span></label>
-    <label class="field"><span>Lieu</span><input data-f="location" value="${esc(f.location)}" list="locations" maxlength="60" placeholder="Maison, vacances…"></label>
-    <datalist id="locations">${[...new Set(S.data.plays.map((p) => p.location).filter(Boolean))].map((l) => `<option value="${esc(l)}">`).join("")}</datalist>
     <label class="field"><span>Commentaire</span><textarea data-f="notes" rows="2" maxlength="1000">${esc(f.notes)}</textarea></label>
     <p class="form-error" id="form-error" role="alert"></p>
     <div class="form-actions"><a class="btn ghost" href="${id ? `#/plays/${id}` : "#/plays"}">Annuler</a><button class="btn primary" type="submit">${id ? "Enregistrer" : "Enregistrer la partie"}</button></div>
@@ -581,7 +576,7 @@ function buildPlayPayload() {
   }
   return {
     id: f.id || uuid(), game_id: f.game_id, played_at: f.played_at, mode: f.mode, coop_result,
-    is_learning: !!f.is_learning, duration_min: num(f.duration_min), location: f.location.trim() || null,
+    is_learning: !!f.is_learning, duration_min: num(f.duration_min), location: f.location || null,
     notes: f.notes.trim() || null, players, expansions: f.expansions.filter((e) => game(e)?.base_game_id === f.game_id),
   };
 }

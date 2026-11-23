@@ -10,7 +10,7 @@ import {
   globalStats, gameStats, playerStats, filterPlays, PERIODS, autoRanks, isComp, MIN_SAMPLE, monthsBack,
 } from "./stats.js";
 
-const VERSION = "1.0.1 (lot 1)";
+const VERSION = "1.0.2 (lot 1)";
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 

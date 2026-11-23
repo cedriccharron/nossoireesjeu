@@ -85,7 +85,7 @@ function seed() {
     const play = {
       id: uuid(), game_id: game.id, played_at: d, mode, coop_result, is_learning: i === 45,
       duration_min: r() < 0.6 ? Math.round((game.min_time + (game.max_time - game.min_time) * r()) / 5) * 5 : null,
-      location: r() < 0.7 ? "Maison" : r() < 0.5 ? "Chez Sam" : "Vacances",
+      location: null,
       notes: null, created_by: ME, created_at: `${d}T21:30:00Z`, updated_at: `${d}T21:30:00Z`,
       players: pp, expansions: game === g.azul && r() < 0.3 ? [g.azulExp.id] : [],
     };

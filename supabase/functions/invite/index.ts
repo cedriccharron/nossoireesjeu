@@ -9,6 +9,17 @@ const cors = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
+// Nouvelles clés Supabase (JSON { default: "sb_..." }), sinon anciennes clés.
+function key(dict: string, legacy: string): string {
+  try {
+    const k = JSON.parse(Deno.env.get(dict) ?? "{}").default;
+    if (k) return k;
+  } catch { /* variable absente */ }
+  const l = Deno.env.get(legacy);
+  if (!l) throw new Error(`Clé ${dict} introuvable dans l'environnement`);
+  return l;
+}
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
 
@@ -16,8 +27,8 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   try {
     const url = Deno.env.get("SUPABASE_URL")!;
-    const anon = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const anon = key("SUPABASE_PUBLISHABLE_KEYS", "SUPABASE_ANON_KEY");
+    const service = key("SUPABASE_SECRET_KEYS", "SUPABASE_SERVICE_ROLE_KEY");
 
     // 1. Vérifier que l'appelant est gestionnaire
     const caller = createClient(url, anon, {

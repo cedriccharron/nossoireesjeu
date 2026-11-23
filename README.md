@@ -24,6 +24,7 @@ Tant que `js/config.js` est vide, l'app tourne en **mode démo** avec des donné
 3. Menu **Authentication** :
    - **Sign In / Providers** → laisse **Email** activé et **désactive « Allow new users to sign up »**.
      Seules les invitations créeront des comptes.
+   - **Emails → SMTP Settings** : active un SMTP personnalisé (voir étape 4), sinon aucune invitation ne partira.
    - **URL Configuration** → **Site URL** = l'adresse GitHub Pages de l'étape 3
      (ex. `https://ton-pseudo.github.io/nossoireesjeu/`). Ajoute la même adresse dans **Redirect URLs**.
 4. **Crée ton propre compte** : **Authentication → Users → Add user → Create new user**,
@@ -79,7 +80,10 @@ Tant que `js/config.js` est vide, l'app tourne en **mode démo** avec des donné
 3. Dans **Plus → Comptes**, invite les autres personnes. Pour chacune, choisis le rôle (gestionnaire ou joueur)
    et, si tu veux, la fiche joueur à laquelle la relier. Chaque personne reçoit un e-mail pour choisir son mot de passe.
 
-> Le service d'e-mail intégré de Supabase n'envoie que quelques messages par heure : étale les invitations.
+> **Important :** sans serveur d'envoi personnalisé, Supabase n'envoie les e-mails qu'aux membres de l'équipe du projet,
+> et au maximum 2 par heure. Les invitations aux autres personnes ne partiraient donc pas.
+> Configure un SMTP personnalisé (ex. Gmail : Authentication → Emails → Custom SMTP, hôte `smtp.gmail.com`, port 587,
+> mot de passe d'application Google), ou crée les comptes à la main dans Authentication → Users → Add user.
 
 ## Étape 5 — Importer la ludothèque
 

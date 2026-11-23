@@ -6,6 +6,7 @@
 // Secret requis : BGG_TOKEN   (supabase secrets set BGG_TOKEN=...)
 
 import { XMLParser } from "npm:fast-xml-parser@4.5.0";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 const BGG = "https://boardgamegeek.com/xmlapi2";
 const cors = {
@@ -126,9 +127,22 @@ async function collection(user: string) {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
 
+// Seuls les comptes connectés à NosSoireesJeu peuvent utiliser le jeton BGG.
+async function signedIn(req: Request): Promise<boolean> {
+  let pub = "";
+  try { pub = JSON.parse(Deno.env.get("SUPABASE_PUBLISHABLE_KEYS") ?? "{}").default ?? ""; } catch { /* absent */ }
+  pub ||= Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+  const sb = createClient(Deno.env.get("SUPABASE_URL")!, pub, {
+    global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
+  });
+  const { data } = await sb.auth.getUser();
+  return !!data?.user;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   try {
+    if (!(await signedIn(req))) return json({ error: "Connexion requise" }, 401);
     const url = new URL(req.url);
     const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
     const q = body.q ?? url.searchParams.get("q");

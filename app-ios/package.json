@@ -1,0 +1,17 @@
+{
+  "name": "nossoireesjeu-ios",
+  "private": true,
+  "description": "Emballage iOS (Capacitor) de NosSoireesJeu. Le site web reste à la racine du dépôt.",
+  "scripts": {
+    "web": "node copier-web.mjs",
+    "sync": "node copier-web.mjs && npx cap sync ios",
+    "ouvrir": "npx cap open ios"
+  },
+  "dependencies": {
+    "@capacitor/core": "8.6.2",
+    "@capacitor/ios": "8.6.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.6.2"
+  }
+}

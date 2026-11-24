@@ -1,6 +1,13 @@
 // Stockage en ligne : Supabase (comptes, base de données, fonctions serveur).
 import { CONFIG } from "./config.js";
 
+// Adresse du site pour les liens envoyés par e-mail (invitation, mot de passe oublié).
+// Dans l'app iPhone (Capacitor), location vaut capacitor://localhost : on renvoie vers le site public.
+const SITE_PUBLIC = "https://cedriccharron.github.io/nossoireesjeu/";
+function webUrl() {
+  return window.Capacitor?.isNativePlatform?.() ? SITE_PUBLIC : location.origin + location.pathname;
+}
+
 export async function createSupabaseStore() {
   const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.49.4");
   const sb = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY, {
@@ -44,7 +51,7 @@ export async function createSupabaseStore() {
     async signIn(email, password) { must(await sb.auth.signInWithPassword({ email, password })); },
     async signOut() { await sb.auth.signOut(); },
     async resetPassword(email) {
-      must(await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname }));
+      must(await sb.auth.resetPasswordForEmail(email, { redirectTo: webUrl() }));
     },
     async setPassword(password) { must(await sb.auth.updateUser({ password })); },
 
@@ -119,7 +126,7 @@ export async function createSupabaseStore() {
     async updateProfile(id, patch) { must(await sb.from("profiles").update(patch).eq("id", id)); },
     async updateMyName(name) { must(await sb.rpc("update_my_name", { new_name: name })); },
     async invite(payload) {
-      return invokeFn("invite", { ...payload, redirect_to: location.origin + location.pathname });
+      return invokeFn("invite", { ...payload, redirect_to: webUrl() });
     },
 
     bgg: {

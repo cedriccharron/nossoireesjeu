@@ -8,7 +8,8 @@ Langue de l'interface, des commentaires et des échanges : **français**.
 - **Front** : HTML/CSS/JS vanilla, modules ES, **aucune étape de build**. Hébergé sur GitHub Pages
   (`https://cedriccharron.github.io/nossoireesjeu/`, branche `main`, racine du dépôt).
 - **Back** : Supabase (plan gratuit) — Auth e-mail, Postgres + RLS, 2 Edge Functions (Deno).
-- **Pas de compte Apple Developer** : c'est la raison du choix PWA.
+- **App iPhone native** (depuis le 24/11/2026, Cédric a un compte Apple Developer) : emballage Capacitor 8 dans `app-ios/`,
+  qui embarque une copie du site. Diffusion : **TestFlight d'abord, App Store ensuite**. La PWA reste en ligne.
 - Mode démo automatique quand `js/config.js` est vide (données fictives en localStorage) ou avec `?demo`.
 
 ## Fichiers
@@ -24,6 +25,7 @@ Langue de l'interface, des commentaires et des échanges : **français**.
 | `supabase/schema.sql` | Schéma complet, **rejouable sans perte** (`if not exists`, `drop policy if exists`) |
 | `supabase/functions/bgg/` | Relais API XML BoardGameGeek (jeton `BGG_TOKEN` en secret Supabase), vérifie que l'appelant est connecté |
 | `supabase/functions/invite/` | Invitation d'un compte par un gestionnaire (clé secrète côté serveur) |
+| `app-ios/` | App iOS Capacitor (bundle `com.cedriccharron.nossoireesjeu`, nom « Soirées Jeu », iPhone seul, portrait). `npm run sync` recopie le site dans `www/` puis dans le projet Xcode ; `npm run ouvrir` ouvre Xcode |
 
 ## Règles métier
 - Rôles : `admin` (gestionnaire : saisit, modifie, supprime) et `viewer` (joueur : consultation de tout).
@@ -65,4 +67,7 @@ Langue de l'interface, des commentaires et des échanges : **français**.
 - Après toute modification du schéma : l'écrire de façon rejouable dans `supabase/schema.sql`
   et donner à Cédric le bloc SQL à exécuter dans Supabase > SQL Editor.
 - Avant de proposer une mise en ligne : vérifier en mode démo, incrémenter `VERSION` dans `sw.js` et `js/app.js`.
+- App iOS : après toute modification du site, `cd app-ios && npm run sync`, puis augmenter le numéro de build dans Xcode
+  avant chaque envoi TestFlight. Les liens d'e-mail pointent toujours vers le site public (`webUrl()` dans `store-supabase.js`).
+- Pour l'examen App Store (étape 2) il faudra : suppression de compte dans l'app, politique de confidentialité, compte de démo.
 - Expliquer à Cédric les étapes manuelles (Supabase, GitHub) pas à pas, en français.

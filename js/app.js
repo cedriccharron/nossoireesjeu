@@ -10,7 +10,7 @@ import {
   globalStats, gameStats, playerStats, filterPlays, PERIODS, autoRanks, isComp, MIN_SAMPLE, monthsBack,
 } from "./stats.js";
 
-const VERSION = "1.0.7 (lot 1)";
+const VERSION = "1.0.8 (lot 1)";
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
@@ -83,11 +83,33 @@ async function boot() {
 async function reload() {
   try {
     S.data = await S.store.loadAll();
+    lastRefresh = Date.now();
   } catch (e) {
     toast(e.message, "error");
   }
   render();
 }
+
+// Actualisation discrète (iCloud) : au retour dans l'app et à l'ouverture de Plus, pour voir
+// les invités qui viennent d'accepter, les parties saisies par un autre gestionnaire, etc.
+let lastRefresh = Date.now(), refreshing = false;
+async function quietRefresh(minGap = 5000) {
+  if (S.store?.mode !== "icloud" || !S.data || refreshing || Date.now() - lastRefresh < minGap) return;
+  refreshing = true;
+  try {
+    const data = await S.store.loadAll();
+    lastRefresh = Date.now();
+    const { parts } = route();
+    const viewer = $("#viewer");
+    const busy = parts[2] === "edit" || parts[1] === "new" || parts[1] === "draft" || (viewer && !viewer.hidden)
+      || document.activeElement?.matches?.("input, textarea, select"); // ne pas effacer une saisie en cours
+    if (JSON.stringify(data) === JSON.stringify(S.data)) return;
+    S.data = data;
+    if (!busy) { const y = window.scrollY; render(); window.scrollTo(0, y); }
+  } catch { /* hors ligne : on garde l'affichage */ }
+  finally { refreshing = false; }
+}
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") quietRefresh(); });
 
 // ---------- Navigation --------------------------------------------------
 function route() {
@@ -141,6 +163,7 @@ function render() {
 }
 
 function afterRender(a, b, c) {
+  if (a === "more") quietRefresh();
   if (a === "plays" && (b === "new" || c === "edit")) refreshRanks();
   if (a === "plays" && b && b !== "new" && b !== "deleted" && !c) { loadHistory(b); loadPhotos(b); }
   if (a === "plays" && b === "deleted") loadDeleted();

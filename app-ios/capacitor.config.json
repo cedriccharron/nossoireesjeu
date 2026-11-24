@@ -1,6 +1,6 @@
 {
   "appId": "com.cedriccharron.nossoireesjeu",
-  "appName": "Soirées Jeu",
+  "appName": "C-Party",
   "webDir": "www",
   "ios": {
     "contentInset": "never",

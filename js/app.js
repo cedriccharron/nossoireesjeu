@@ -10,7 +10,7 @@ import {
   globalStats, gameStats, playerStats, filterPlays, PERIODS, autoRanks, isComp, MIN_SAMPLE, monthsBack,
 } from "./stats.js";
 
-const VERSION = "1.0.4 (lot 1)";
+const VERSION = "1.0.5 (lot 1)";
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
@@ -231,7 +231,7 @@ function viewHome() {
   const st = globalStats(S.data, plays);
   const recent = playsSorted().slice(0, 5);
   if (!S.data.plays.length) {
-    return header("NosSoireesJeu") + `<div class="empty">
+    return header("C-Party") + `<div class="empty">
       <p><strong>Aucune partie pour l'instant.</strong></p>
       ${isAdmin() ? `<p class="muted">Commence par ajouter tes jeux, puis enregistre une première partie.</p>
         <div class="row-gap"><a class="btn" href="#/games/import">Importer ma collection BGG</a><a class="btn primary" href="#/plays/new">Nouvelle partie</a></div>`
@@ -239,7 +239,7 @@ function viewHome() {
     </div>` + fab("#/plays/new", "Nouvelle partie");
   }
   const myPlayer = S.data.me.player_id && player(S.data.me.player_id);
-  return header("NosSoireesJeu", { sub: myPlayer ? `Bonjour ${esc(myPlayer.name)}` : "" }) + `
+  return header("C-Party", { sub: myPlayer ? `Bonjour ${esc(myPlayer.name)}` : "" }) + `
     ${periodChips()}
     <section class="kpis">
       ${kpi("parties", fmtNum(st.count), st.learning ? `dont ${st.learning} d'apprentissage` : "")}
@@ -936,14 +936,14 @@ function viewMore() {
       <ol class="small steps"><li>Ouvre cette page dans <strong>Safari</strong>.</li><li>Touche le bouton <strong>Partager</strong> ${icon("share", 16)}.</li>
       <li>Choisis <strong>Sur l'écran d'accueil</strong>, puis <strong>Ajouter</strong>.</li></ol></section>` : ""}
     <section class="panel small"><h2>À propos</h2>
-      <p>NosSoireesJeu · version ${VERSION}</p>
+      <p>C-Party · version ${VERSION}</p>
       <p class="muted">Données de jeux : <a href="https://boardgamegeek.com" target="_blank" rel="noopener">BoardGameGeek</a>, usage non commercial.</p></section>
     ${S.store.mode === "cloud" ? `<p class="center"><button class="btn ghost" data-action="logout">${icon("logout", 18)} Se déconnecter</button></p>` : ""}`;
 }
 
 // ---------- Connexion ------------------------------------------------------
 function viewLogin() {
-  return `<div class="auth"><img src="icons/icon-192.png" alt="" width="84" height="84"><h1>NosSoireesJeu</h1>
+  return `<div class="auth"><img src="icons/icon-192.png" alt="" width="84" height="84"><h1>C-Party</h1>
     <form class="form" data-form="login">
       <label class="field"><span>E-mail</span><input name="email" type="email" autocomplete="username" required autocapitalize="off"></label>
       <label class="field"><span>Mot de passe</span><input name="password" type="password" autocomplete="current-password" required></label>

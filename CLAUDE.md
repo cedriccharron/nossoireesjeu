@@ -1,6 +1,6 @@
 # NosSoireesJeu — contexte du projet pour Claude Code
 
-Web app installable (PWA) pour enregistrer les parties de jeux de société d'un cercle privé
+Web app installable (PWA) **« C-Party »** (ex-NosSoireesJeu, renommée le 24/11/2026 ; dépôt, URL et Bundle ID inchangés) pour enregistrer les parties de jeux de société d'un cercle privé
 (≤ 10 personnes, toutes sur iPhone) et en tirer des statistiques. Propriétaire : Cédric.
 Langue de l'interface, des commentaires et des échanges : **français**.
 
@@ -25,7 +25,7 @@ Langue de l'interface, des commentaires et des échanges : **français**.
 | `supabase/schema.sql` | Schéma complet, **rejouable sans perte** (`if not exists`, `drop policy if exists`) |
 | `supabase/functions/bgg/` | Relais API XML BoardGameGeek (jeton `BGG_TOKEN` en secret Supabase), vérifie que l'appelant est connecté |
 | `supabase/functions/invite/` | Invitation d'un compte par un gestionnaire (clé secrète côté serveur) |
-| `app-ios/` | App iOS Capacitor (bundle `com.cedriccharron.nossoireesjeu`, nom « Soirées Jeu », iPhone seul, portrait). `npm run sync` recopie le site dans `www/` puis dans le projet Xcode ; `npm run ouvrir` ouvre Xcode |
+| `app-ios/` | App iOS Capacitor (bundle `com.cedriccharron.nossoireesjeu`, nom affiché « C-Party », iPhone seul, portrait). `npm run sync` recopie le site dans `www/` puis dans le projet Xcode ; `npm run ouvrir` ouvre Xcode |
 
 ## Règles métier
 - Rôles : `admin` (gestionnaire : saisit, modifie, supprime) et `viewer` (joueur : consultation de tout).

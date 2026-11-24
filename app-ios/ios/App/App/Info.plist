@@ -22,6 +22,10 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>NSCameraUsageDescription</key>
+	<string>C-Party utilise l'appareil photo pour joindre des photos à une partie.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>C-Party ouvre ta photothèque pour joindre des photos à une partie.</string>
 	<key>CKSharingSupported</key>
 	<true/>
 	<key>ITSAppUsesNonExemptEncryption</key>

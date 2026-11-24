@@ -3,6 +3,7 @@
 import { uuid, PLAYER_COLORS, guessFrenchName } from "./util.js";
 
 const KEY = "nsj-demo-v1";
+const PHOTO_KEY = "nsj-demo-photos-v1"; // photos de la démo, à part (elles sont lourdes)
 const ME = "demo-user";
 
 // Catalogue fictif pour simuler la recherche BGG en mode démo.
@@ -121,6 +122,11 @@ export function createDemoStore() {
   const clone = (x) => JSON.parse(JSON.stringify(x));
   const requireAdmin = () => { if (db.viewAs !== "admin") throw new Error("Action réservée aux gestionnaires"); };
   const delay = (v) => new Promise((ok) => setTimeout(() => ok(v), 120));
+  const loadPhotos = () => { try { return JSON.parse(localStorage.getItem(PHOTO_KEY)) || []; } catch { return []; } };
+  const savePhotos = (list) => {
+    try { localStorage.setItem(PHOTO_KEY, JSON.stringify(list)); }
+    catch { throw new Error("Mode démo : plus de place pour les photos dans ce navigateur"); }
+  };
 
   return {
     mode: "demo",
@@ -131,12 +137,14 @@ export function createDemoStore() {
     async loadAll() {
       load();
       const me = { ...db.profiles.find((p) => p.id === ME), role: db.viewAs };
-      return clone({ me, profiles: db.profiles.map((p) => (p.id === ME ? me : p)), players: db.players, games: db.games, plays: db.plays });
+      const n = new Map(); loadPhotos().forEach((ph) => n.set(ph.play_id, (n.get(ph.play_id) || 0) + 1));
+      return clone({ me, profiles: db.profiles.map((p) => (p.id === ME ? me : p)), players: db.players, games: db.games,
+        plays: db.plays.map((p) => ({ ...p, photo_count: n.get(p.id) || 0 })) });
     },
 
     // Démo uniquement : basculer entre vue gestionnaire et vue joueur, réinitialiser.
     setViewAs(role) { db.viewAs = role; save(); },
-    reset() { localStorage.removeItem(KEY); load(); },
+    reset() { localStorage.removeItem(KEY); localStorage.removeItem(PHOTO_KEY); load(); },
 
     async saveGame(game) {
       requireAdmin();
@@ -151,6 +159,8 @@ export function createDemoStore() {
       requireAdmin();
       const ids = new Set([id, ...db.games.filter((g) => g.base_game_id === id).map((g) => g.id)]);
       db.plays.filter((p) => ids.has(p.game_id)).forEach((p) => this._logDelete(p));
+      const goneIds = new Set(db.plays.filter((p) => ids.has(p.game_id)).map((p) => p.id));
+      if (goneIds.size) savePhotos(loadPhotos().filter((ph) => !goneIds.has(ph.play_id)));
       db.plays = db.plays.filter((p) => !ids.has(p.game_id));
       db.plays.forEach((p) => (p.expansions = (p.expansions || []).filter((e) => !ids.has(e))));
       db.games = db.games.filter((g) => !ids.has(g.id));
@@ -221,6 +231,20 @@ export function createDemoStore() {
       db.history.forEach((h) => latest.set(h.play_id, h));
       return delay(clone([...latest.values()].filter((h) => h.action === "delete" && !alive.has(h.play_id)).sort((a, b) => b.id - a.id)));
     },
+
+    // Photos : gardées si la partie est supprimée (restauration possible).
+    async photos(playId) {
+      return delay(loadPhotos().filter((ph) => ph.play_id === playId).map(({ full, ...ph }) => ph)
+        .sort((a, b) => a.created_at.localeCompare(b.created_at)));
+    },
+    async photoFull(id) { return delay(loadPhotos().find((ph) => ph.id === id)?.full || null); },
+    async addPhotos(playId, list) {
+      requireAdmin();
+      const all = loadPhotos();
+      list.forEach(({ full, thumb }) => all.push({ id: uuid(), play_id: playId, full, thumb, created_by: ME, created_at: new Date().toISOString() }));
+      savePhotos(all); return delay(list.length);
+    },
+    async deletePhoto(id) { requireAdmin(); savePhotos(loadPhotos().filter((ph) => ph.id !== id)); return delay(); },
 
     async updateProfile(id, patch) {
       requireAdmin();

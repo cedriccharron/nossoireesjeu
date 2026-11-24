@@ -2,7 +2,8 @@
 //
 // Modèle : une zone « CParty » dans la base PRIVÉE du propriétaire, partagée en entier
 // (CKShare de zone). Les invités la voient dans leur base PARTAGÉE.
-// Chaque enregistrement porte un seul champ « json » : l'objet complet côté JavaScript.
+// Chaque enregistrement porte un champ « json » : l'objet complet côté JavaScript.
+// Les photos (type « Photo ») ont en plus un champ « image » (CKAsset), lu seulement à la demande.
 // Toute la logique métier reste en JavaScript (js/store-icloud.js) ; ce fichier ne fait que
 // lire, écrire (atomiquement) et gérer le partage.
 
@@ -81,7 +82,8 @@ final class CloudSpace {
         var token: CKServerChangeToken? = nil
         var more = true
         while more {
-            let r = try await a.db.recordZoneChanges(inZoneWith: a.zoneID, since: token)
+            // Seul le champ « json » est téléchargé : les images des photos restent dans iCloud.
+            let r = try await a.db.recordZoneChanges(inZoneWith: a.zoneID, since: token, desiredKeys: ["json"])
             for (_, res) in r.modificationResultsByID {
                 if case .success(let m) = res, !(m.record is CKShare) { out.append(m.record) }
             }
@@ -92,10 +94,18 @@ final class CloudSpace {
     }
 
     /// Écrit et supprime en une seule opération : tout passe ou rien ne passe.
-    func modify(_ a: Active, save: [(type: String, name: String, json: String)], remove: [String]) async throws {
-        let records: [CKRecord] = save.map { item in
+    func modify(_ a: Active, save: [(type: String, name: String, json: String, image: Data?)], remove: [String]) async throws {
+        var files: [URL] = []
+        defer { files.forEach { try? FileManager.default.removeItem(at: $0) } }
+        let records: [CKRecord] = try save.map { item in
             let r = CKRecord(recordType: item.type, recordID: CKRecord.ID(recordName: item.name, zoneID: a.zoneID))
             r["json"] = item.json as CKRecordValue
+            if let data = item.image {
+                let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
+                try data.write(to: url)
+                files.append(url)
+                r["image"] = CKAsset(fileURL: url)
+            }
             return r
         }
         let ids = remove.map { CKRecord.ID(recordName: $0, zoneID: a.zoneID) }
@@ -104,6 +114,16 @@ final class CloudSpace {
         for (id, r) in res.deleteResults {
             if case .failure(let e) = r, (e as? CKError)?.code != .unknownItem { _ = id; throw e }
         }
+    }
+
+    /// Image complète d'une photo (JPEG).
+    func image(_ a: Active, name: String) async throws -> Data {
+        let id = CKRecord.ID(recordName: name, zoneID: a.zoneID)
+        let res = try await a.db.records(for: [id], desiredKeys: ["image"])
+        guard case .success(let r)? = res[id], let asset = r["image"] as? CKAsset, let url = asset.fileURL else {
+            throw NSError(domain: "CParty", code: 3, userInfo: [NSLocalizedDescriptionKey: "Photo introuvable"])
+        }
+        return try Data(contentsOf: url)
     }
 
     func shareForSharing(_ a: Active) async throws -> CKShare {
@@ -145,6 +165,7 @@ public class CloudStorePlugin: CAPPlugin, CAPBridgedPlugin, UICloudSharingContro
         CAPPluginMethod(name: "createSpace", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "fetchAll", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "modify", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "image", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "participants", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "manageSharing", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "invite", returnType: CAPPluginReturnPromise),
@@ -194,15 +215,24 @@ public class CloudStorePlugin: CAPPlugin, CAPBridgedPlugin, UICloudSharingContro
     }
 
     @objc func modify(_ call: CAPPluginCall) {
-        let save = (call.getArray("save") as? [[String: Any]] ?? []).compactMap { d -> (type: String, name: String, json: String)? in
+        // « image » (facultatif) : JPEG encodé en base64, enregistré comme CKAsset.
+        let save = (call.getArray("save") as? [[String: Any]] ?? []).compactMap { d -> (type: String, name: String, json: String, image: Data?)? in
             guard let t = d["type"] as? String, let n = d["name"] as? String, let j = d["json"] as? String else { return nil }
-            return (t, n, j)
+            return (t, n, j, (d["image"] as? String).flatMap { Data(base64Encoded: $0) })
         }
         let remove = call.getArray("remove") as? [String] ?? []
         run(call) {
             let a = try await self.space.requireActive()
             try await self.space.modify(a, save: save, remove: remove)
             return [:]
+        }
+    }
+
+    @objc func image(_ call: CAPPluginCall) {
+        let name = call.getString("name") ?? ""
+        run(call) {
+            let a = try await self.space.requireActive()
+            return ["data": try await self.space.image(a, name: name).base64EncodedString()]
         }
     }
 

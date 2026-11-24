@@ -4,13 +4,13 @@ import { createDemoStore } from "./store-demo.js";
 import { icon } from "./icons.js";
 import {
   esc, uuid, today, fmtDate, fmtShort, fmtDateTime, monthLabel, monthShort, fmtNum, fmtPct, fmtHours, fmtScore,
-  plural, debounce, initials, toast, confirmDialog, guessFrenchName, PLAYER_COLORS, MODES, STATUS, SCORE_RULES,
+  plural, debounce, initials, toast, confirmDialog, preparePhoto, guessFrenchName, PLAYER_COLORS, MODES, STATUS, SCORE_RULES,
 } from "./util.js";
 import {
   globalStats, gameStats, playerStats, filterPlays, PERIODS, autoRanks, isComp, MIN_SAMPLE, monthsBack,
 } from "./stats.js";
 
-const VERSION = "1.0.6 (lot 1)";
+const VERSION = "1.0.7 (lot 1)";
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
@@ -142,7 +142,7 @@ function render() {
 
 function afterRender(a, b, c) {
   if (a === "plays" && (b === "new" || c === "edit")) refreshRanks();
-  if (a === "plays" && b && b !== "new" && b !== "deleted" && !c) loadHistory(b);
+  if (a === "plays" && b && b !== "new" && b !== "deleted" && !c) { loadHistory(b); loadPhotos(b); }
   if (a === "plays" && b === "deleted") loadDeleted();
   const focus = $("[data-autofocus]");
   if (focus && !matchMedia("(hover: none)").matches) focus.focus();
@@ -220,7 +220,7 @@ function playCard(p) {
     <div class="pc-body">
       <div class="pc-top"><strong>${esc(g?.name || "Jeu supprimé")}</strong><span class="muted small">${fmtShort(p.played_at)}</span></div>
       <div class="pc-res">${playResultLine(p)}</div>
-      <div class="pc-meta muted small">${plural(p.players.length, "joueur", "joueurs")}${p.mode !== "competitive" ? ` · ${MODES[p.mode]}` : ""}${p.is_learning ? ` · <span class="tag">Apprentissage</span>` : ""}</div>
+      <div class="pc-meta muted small">${plural(p.players.length, "joueur", "joueurs")}${p.mode !== "competitive" ? ` · ${MODES[p.mode]}` : ""}${p.is_learning ? ` · <span class="tag">Apprentissage</span>` : ""}${p.photo_count ? ` · ${icon("camera", 13)} ${p.photo_count}` : ""}</div>
     </div></a>`;
 }
 
@@ -346,12 +346,76 @@ function viewPlay(id) {
       ${p.notes ? `<div class="note">${esc(p.notes)}</div>` : ""}
       ${g ? `<div><a href="#/games/${g.id}">Voir la fiche du jeu</a></div>` : ""}
     </section>
+    ${p.photo_count || isAdmin() ? `<section class="panel">
+      <div class="panel-head"><h2>${icon("camera", 18)} Photos</h2>${isAdmin() ? photoPicker(`data-add-photos="${p.id}"`, "Ajouter") : ""}</div>
+      <div id="photos" class="photos">${p.photo_count ? `<p class="muted small">Chargement…</p>` : `<p class="muted small">Aucune photo pour l'instant.</p>`}</div>
+    </section>` : ""}
     <section class="panel">
       <h2>${icon("history", 18)} Historique</h2>
       <p class="muted small">Saisie${p.created_at ? ` le ${fmtDateTime(p.created_at)}` : ""}${creator ? ` par ${esc(creator.display_name || creator.email)}` : ""}</p>
       <div id="history" class="history"><p class="muted small">Chargement…</p></div>
     </section>`;
 }
+
+// ---------- Photos ---------------------------------------------------------
+const photoPicker = (attr, label) => `<label class="btn small">${icon("camera", 16)} ${label}
+  <input type="file" accept="image/*" multiple hidden ${attr}></label>`;
+async function prepareAll(files) {
+  const out = [];
+  for (const f of files) out.push(await preparePhoto(f, S.store.mode === "demo" ? 900 : 1600));
+  return out;
+}
+async function uploadPhotos(playId, list) {
+  for (let i = 0; i < list.length; i++) {
+    if (list.length > 1) toast(`Envoi des photos (${i + 1}/${list.length})…`);
+    await S.store.addPhotos(playId, [list[i]]);
+  }
+}
+async function loadPhotos(playId) {
+  const box = $("#photos");
+  if (!box) return;
+  try {
+    const rows = await S.store.photos(playId);
+    if (!$("#photos")) return;
+    S.photoList = rows;
+    box.innerHTML = rows.length ? rows.map((ph, i) => `<button class="ph" data-action="photo-open" data-i="${i}" aria-label="Voir la photo ${i + 1}">
+      <img src="${esc(ph.thumb)}" alt="" loading="lazy"></button>`).join("") : `<p class="muted small">Aucune photo pour l'instant.</p>`;
+  } catch (e) { box.innerHTML = `<p class="muted small">${esc(e.message)}</p>`; }
+}
+// Visionneuse plein écran : flèches, balayage, suppression pour les gestionnaires.
+async function openViewer(i) {
+  const list = S.photoList || [];
+  const ph = list[i];
+  if (!ph) return;
+  let v = $("#viewer");
+  if (!v) { v = document.createElement("div"); v.id = "viewer"; v.className = "viewer"; document.body.append(v); }
+  v.dataset.i = i;
+  v.innerHTML = `<img src="${esc(ph.thumb)}" alt="Photo ${i + 1} sur ${list.length}">
+    <div class="viewer-bar">
+      <button class="icon-btn" data-action="photo-close" aria-label="Fermer">${icon("x", 24)}</button>
+      <span class="small">${i + 1} / ${list.length}</span>
+      ${isAdmin() ? `<button class="icon-btn" data-action="photo-delete" aria-label="Supprimer la photo">${icon("trash", 22)}</button>` : "<span></span>"}
+    </div>
+    ${i > 0 ? `<button class="viewer-nav prev" data-action="photo-nav" data-d="-1" aria-label="Photo précédente">${icon("chevronLeft", 28)}</button>` : ""}
+    ${i < list.length - 1 ? `<button class="viewer-nav next" data-action="photo-nav" data-d="1" aria-label="Photo suivante">${icon("chevronRight", 28)}</button>` : ""}`;
+  v.hidden = false;
+  document.body.classList.add("no-scroll");
+  try {
+    const full = await S.store.photoFull(ph.id);
+    const img = v.querySelector("img");
+    if (full && img && v.dataset.i === String(i)) img.src = full;
+  } catch (e) { toast(e.message, "error"); }
+}
+function closeViewer() { const v = $("#viewer"); if (v) v.hidden = true; document.body.classList.remove("no-scroll"); }
+let touchX = null;
+document.addEventListener("touchstart", (e) => { touchX = e.target.closest("#viewer") ? e.touches[0].clientX : null; }, { passive: true });
+document.addEventListener("touchend", (e) => {
+  if (touchX == null) return;
+  const dx = e.changedTouches[0].clientX - touchX; touchX = null;
+  const v = $("#viewer");
+  if (v && !v.hidden && Math.abs(dx) > 50) openViewer(Number(v.dataset.i) + (dx < 0 ? 1 : -1));
+});
+window.addEventListener("hashchange", closeViewer);
 
 const FIELD_LABELS = { game_id: "Jeu", played_at: "Date", mode: "Mode", coop_result: "Résultat", is_learning: "Apprentissage", duration_min: "Durée", notes: "Commentaire" };
 function fieldValue(k, v) {
@@ -431,7 +495,7 @@ function newForm(query) {
     id: null, game_id: g ? g.id : "", played_at: today(), mode: g ? g.default_mode : "competitive",
     coop_result: "", is_learning: false, duration_min: "", notes: "",
     expansions: [], players: [], teams: [{ name: "Équipe 1", score: "", rank: "" }, { name: "Équipe 2", score: "", rank: "" }],
-    manual: false,
+    manual: false, photos: [],
   };
 }
 function formFromPlay(p) {
@@ -445,7 +509,7 @@ function formFromPlay(p) {
     is_learning: !!p.is_learning, duration_min: p.duration_min ?? "", location: p.location || null, notes: p.notes || "",
     expansions: [...(p.expansions || [])],
     players: p.players.map((x) => ({ player_id: x.player_id, score: x.score ?? "", rank: x.rank ?? "", team: x.team || "" })),
-    teams, manual: true,
+    teams, manual: true, photos: [],
   };
 }
 
@@ -534,6 +598,11 @@ function viewPlayForm(id, query) {
     </fieldset>` : ""}
     <label class="check"><input type="checkbox" data-f="is_learning" ${f.is_learning ? "checked" : ""}> Partie d'apprentissage <span class="muted small">(exclue des victoires)</span></label>
     <label class="field"><span>Commentaire</span><textarea data-f="notes" rows="2" maxlength="1000">${esc(f.notes)}</textarea></label>
+    <fieldset class="field"><legend>Photos ${id ? `<span class="muted small">· à ajouter</span>` : ""}</legend>
+      <div class="photos">${f.photos.map((ph, i) => `<div class="ph"><img src="${esc(ph.thumb)}" alt="">
+        <button type="button" class="ph-del" data-action="f-photo-del" data-i="${i}" aria-label="Retirer cette photo">${icon("x", 14)}</button></div>`).join("")}
+        ${photoPicker("data-form-photos", f.photos.length ? "Autres photos" : "Joindre des photos")}</div>
+    </fieldset>
     <p class="form-error" id="form-error" role="alert"></p>
     <div class="form-actions"><a class="btn ghost" href="${id ? `#/plays/${id}` : "#/plays"}">Annuler</a><button class="btn primary" type="submit">${id ? "Enregistrer" : "Enregistrer la partie"}</button></div>
   </form>`;
@@ -1076,6 +1145,16 @@ const actions = {
     render();
   },
   "f-auto": () => { S.form.manual = false; refreshRanks(); },
+  "f-photo-del": (el) => { S.form.photos.splice(Number(el.dataset.i), 1); render(); },
+
+  "photo-open": (el) => openViewer(Number(el.dataset.i)),
+  "photo-close": () => closeViewer(),
+  "photo-nav": (el) => openViewer(Number($("#viewer").dataset.i) + Number(el.dataset.d)),
+  "photo-delete": async () => {
+    const ph = S.photoList?.[Number($("#viewer").dataset.i)];
+    if (!ph || !(await confirmDialog("Supprimer cette photo ? Elle sera effacée pour tout le groupe.", "Supprimer"))) return;
+    try { await S.store.deletePhoto(ph.id); closeViewer(); toast("Photo supprimée"); await reload(); } catch (e) { toast(e.message, "error"); }
+  },
 
   "delete-play": async (el) => {
     if (!(await confirmDialog("Supprimer cette partie ? Elle restera dans le journal des suppressions et pourra être restaurée.", "Supprimer"))) return;
@@ -1202,6 +1281,17 @@ document.addEventListener("change", async (e) => {
   const t = e.target;
   if (t.dataset.imp) { const it = S.importer.items.find((i) => String(i.id) === t.dataset.imp); if (it) it.checked = t.checked; return; }
   if (t.dataset.actionChange === "status") { $("#lent-field").hidden = t.value !== "lent"; return; }
+  if (("addPhotos" in t.dataset || "formPhotos" in t.dataset) && t.files?.length) {
+    const files = [...t.files]; t.value = "";
+    try {
+      const list = await prepareAll(files);
+      if ("formPhotos" in t.dataset) { S.form?.photos.push(...list); render(); return; }
+      await uploadPhotos(t.dataset.addPhotos, list);
+      toast(list.length > 1 ? `${list.length} photos ajoutées` : "Photo ajoutée");
+      await reload();
+    } catch (err) { toast(err.message, "error"); await reload(); }
+    return;
+  }
   if ("importCsv" in t.dataset && t.files?.[0]) {
     const out = $("#import-status");
     try {
@@ -1254,7 +1344,12 @@ document.addEventListener("submit", async (e) => {
     if (kind === "play") {
       const payload = buildPlayPayload();
       const id = await S.store.savePlay(payload);
+      const pics = S.form?.photos || [];
       S.form = null;
+      if (pics.length) {
+        try { await uploadPhotos(id || payload.id, pics); }
+        catch (err) { toast(`Partie enregistrée, mais photos non envoyées : ${err.message}`, "error"); await reload(); go(`#/plays/${id || payload.id}`); return; }
+      }
       toast("Partie enregistrée");
       await reload();
       go(`#/plays/${id || payload.id}`);

@@ -123,6 +123,12 @@ export async function createSupabaseStore() {
       });
     },
 
+    // Photos : uniquement dans l'app iPhone (iCloud). Le site Supabase n'en gère pas.
+    async photos() { return []; },
+    async photoFull() { return null; },
+    async addPhotos() { throw new Error("Les photos sont disponibles dans l'app iPhone"); },
+    async deletePhoto() { throw new Error("Les photos sont disponibles dans l'app iPhone"); },
+
     async updateProfile(id, patch) { must(await sb.from("profiles").update(patch).eq("id", id)); },
     async updateMyName(name) { must(await sb.rpc("update_my_name", { new_name: name })); },
     async invite(payload) {

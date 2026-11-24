@@ -327,3 +327,23 @@ details summary { cursor: pointer; padding: 12px 0; }
 .bval { font-size: 12px; font-weight: 650; margin-bottom: 3px; font-variant-numeric: tabular-nums; }
 .blbl { font-size: 11px; color: var(--muted); margin-top: 4px; white-space: nowrap; overflow: hidden; max-width: 100%; }
 .pchip.on .pdot { box-shadow: 0 0 0 2px #fff; }
+
+/* ---------- Photos d'une partie ---------- */
+.panel-head .btn.small { align-self: center; }
+.photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; align-items: center; }
+.photos > p, .photos > label { grid-column: 1 / -1; justify-self: start; }
+.form .photos > label { grid-column: auto; justify-self: stretch; text-align: center; }
+.ph { position: relative; padding: 0; border: 0; border-radius: 10px; overflow: hidden; aspect-ratio: 1; background: var(--surface-2); cursor: pointer; }
+.ph img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ph-del { position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; border-radius: 50%; border: 0; display: grid; place-items: center;
+  background: rgba(0, 0, 0, .6); color: #fff; cursor: pointer; }
+.viewer { position: fixed; inset: 0; z-index: 100; background: #000; display: grid; place-items: center; }
+.viewer[hidden] { display: none; }
+.viewer > img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.viewer-bar { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; justify-content: space-between;
+  padding: calc(var(--safe-t) + 6px) 10px 6px; color: #fff; background: linear-gradient(rgba(0,0,0,.55), transparent); }
+.viewer-bar .icon-btn { color: #fff; }
+.viewer-nav { position: absolute; top: 50%; transform: translateY(-50%); border: 0; background: rgba(0,0,0,.35); color: #fff;
+  width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; cursor: pointer; }
+.viewer-nav.prev { left: 10px; } .viewer-nav.next { right: 10px; }
+body.no-scroll { overflow: hidden; }

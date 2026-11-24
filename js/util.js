@@ -97,3 +97,25 @@ export function guessFrenchName(primary, names = []) {
   const cand = names.filter((n) => n && n !== primary && fr.test(n) && !/[Ѐ-ӿ぀-ヿ一-鿿가-힯]/.test(n));
   return cand[0] || primary;
 }
+
+// Prépare une photo choisie dans la photothèque ou prise à l'appareil : JPEG réduit + vignette (data URL).
+// La photo complète fait au plus `max` px de côté (≈ 200 à 400 Ko), la vignette 360 px (≈ 20 Ko).
+export async function preparePhoto(file, max = 1600) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((ok, ko) => {
+      const i = new Image();
+      i.onload = () => ok(i);
+      i.onerror = () => ko(new Error(`Image illisible : ${file.name || "photo"}`));
+      i.src = url;
+    });
+    const draw = (size, quality) => {
+      const r = Math.min(1, size / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.naturalWidth * r); c.height = Math.round(img.naturalHeight * r);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      return c.toDataURL("image/jpeg", quality);
+    };
+    return { full: draw(max, 0.82), thumb: draw(360, 0.7) };
+  } finally { URL.revokeObjectURL(url); }
+}

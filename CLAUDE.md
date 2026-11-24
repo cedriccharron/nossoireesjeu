@@ -22,6 +22,10 @@ Cédric a choisi de quitter Supabase pour **iCloud (CloudKit)**, sauf le relais 
 - **Enregistrements** : un type par entité (`Player`, `Game`, `Play`, `History`, `Member`), un champ `json` qui
   contient l'objet complet. Une partie embarque ses joueurs et ses extensions → enregistrement atomique ;
   l'historique est écrit dans la **même** opération atomique (`CKModifyRecordsOperation`, `isAtomic`).
+- **Photos des parties** (ajout du 24/11/2026) : type `Photo` (`ph-<uuid>`), `json` = métadonnées + vignette 360 px
+  en data URL, champ `image` (CKAsset, JPEG ≤ 1600 px) téléchargé seulement à l'ouverture (`CloudStore.image`).
+  `fetchAll` ne lit que `json`. Gestionnaires seulement pour ajouter/supprimer ; gardées si la partie est supprimée
+  (restauration), effacées avec un jeu supprimé. Site Supabase : pas de photos.
 - **App iPhone uniquement** pour les vraies données ; le site GitHub Pages ne garde que le mode démo.
 - **Relais BGG** : reste une fonction Supabase, protégée par une clé propre à l'app (plus de comptes Supabase).
 - **Fait le 24/11/2026** : données importées dans iCloud (production) depuis `export/c-party-2026-11-24.csv`

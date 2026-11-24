@@ -11,7 +11,7 @@ globalThis.window = { Capacitor: { isNativePlatform: () => true, Plugins: { Clou
   addListener() {},
   async status() { return { account: "available", user: "_moi", space: space ? { owner, permission } : undefined }; },
   async createSpace() { space = true; },
-  async fetchAll() { return { records: [...cloud.values()] }; },
+  async fetchAll() { return { records: [...cloud.values()].map(({ image, ...r }) => r) }; }, // l'image n'est pas téléchargée
   async modify({ save, remove }) {
     calls++;
     if (!owner && permission !== "readWrite") throw new Error("Tu n'as pas le droit de modifier ces données");
@@ -19,6 +19,7 @@ globalThis.window = { Capacitor: { isNativePlatform: () => true, Plugins: { Clou
     save.forEach((r) => cloud.set(r.name, r)); remove.forEach((n) => cloud.delete(n));
   },
   async invite({ role }) { lastInvite = role; },
+  async image({ name }) { const r = cloud.get(name); if (!r?.image) throw new Error("Photo introuvable"); return { data: r.image }; },
   async participants() { return { participants: participantsList }; },
 }}}};
 const { createICloudStore, tablesFromExport, icloudAvailable } = await import("../js/store-icloud.js");
@@ -84,4 +85,20 @@ d = await s.loadAll();
 ok(d.me.player_id === d.players[0].id && d.me.display_name === "Cédric", "fiche liée sans perdre le nom");
 await s.invite({ role: "viewer" }); ok(lastInvite === "readOnly", "inviter un joueur = lecture seule");
 await s.invite({ role: "admin" }); ok(lastInvite === "readWrite", "inviter un gestionnaire = modifications autorisées");
+
+// Photos : vignette dans le json, image complète à part, lue à la demande
+const pid = d.plays[0].id;
+await s.addPhotos(pid, [{ full: "data:image/jpeg;base64,QUJD", thumb: "data:image/jpeg;base64,dA==" }, { full: "data:image/jpeg;base64,REVG", thumb: "data:image/jpeg;base64,dQ==" }]);
+const phRec = [...cloud.values()].filter((r) => r.type === "Photo");
+ok(phRec.length === 2 && phRec.every((r) => r.image && !JSON.parse(r.json).full), "2 photos : image en pièce jointe, vignette dans le json");
+const s2 = await createICloudStore(); await s2.init(); d = await s2.loadAll();
+ok(d.plays.find((p) => p.id === pid).photo_count === 2, "nombre de photos sur la partie");
+const phs = await s2.photos(pid);
+ok(phs.length === 2 && phs[0].thumb.startsWith("data:image/jpeg"), "vignettes lues sans télécharger les images");
+ok((await s2.photoFull(phs[1].id)) === "data:image/jpeg;base64,REVG", "photo complète téléchargée à la demande");
+await s2.deletePhoto(phs[0].id);
+ok((await s2.photos(pid)).length === 1 && !cloud.has(`ph-${phs[0].id}`), "photo supprimée");
+owner = false; permission = "readOnly"; await s2.refreshStatus();
+err = null; try { await s2.addPhotos(pid, [{ full: "data:image/jpeg;base64,QQ==", thumb: "x" }]); } catch (e) { err = e.message; }
+ok(err === "Action réservée aux gestionnaires", "joueur : ajout de photo refusé");
 console.log("\nTous les tests passent.");

@@ -7,6 +7,8 @@
 // Enregistrements CloudKit (champ unique « json ») :
 //   Player  <uuid>        Game <uuid>        Play <uuid> (joueurs et extensions embarqués)
 //   History h-<id>        Member m-<identifiant iCloud> (nom affiché, fiche joueur liée)
+//   Photo ph-<uuid> : json = { id, play_id, thumb (vignette JPEG en data URL), … } + champ « image » (CKAsset,
+//   photo complète) que le module natif ne télécharge qu'à la demande (photoFull).
 import { uuid } from "./util.js";
 import { snapshot } from "./store-demo.js";
 import { CONFIG } from "./config.js";
@@ -20,7 +22,8 @@ const BATCH = 300; // CloudKit accepte 400 enregistrements par opération
 export async function createICloudStore() {
   const CS = native();
   let st = null;        // état du compte : { account, user, space: { owner, permission } }
-  let db = null;        // { players, games, plays, history, members }
+  let db = null;        // { players, games, plays, history, members, photos }
+  const fullCache = new Map(); // photos complètes déjà téléchargées
   let participants = [];
   const listeners = [];
 
@@ -51,8 +54,8 @@ export async function createICloudStore() {
 
   async function fetchAll() {
     const { records } = await CS.fetchAll();
-    const out = { players: [], games: [], plays: [], history: [], members: [] };
-    const key = { Player: "players", Game: "games", Play: "plays", History: "history", Member: "members" };
+    const out = { players: [], games: [], plays: [], history: [], members: [], photos: [] };
+    const key = { Player: "players", Game: "games", Play: "plays", History: "history", Member: "members", Photo: "photos" };
     for (const r of records) {
       const k = key[r.type];
       if (!k) continue;
@@ -111,7 +114,7 @@ export async function createICloudStore() {
         id: st.user, email: "", display_name: "", role: canWrite() ? "admin" : "viewer", player_id: null, owner: !!st.space?.owner,
       };
       me.role = canWrite() ? "admin" : "viewer";
-      return clone({ me, profiles: all, players: db.players, games: db.games, plays: db.plays });
+      return clone({ me, profiles: all, players: db.players, games: db.games, plays: withPhotoCount(db.plays, db.photos) });
     },
 
     // ----- Jeux -----
@@ -145,7 +148,10 @@ export async function createICloudStore() {
       const touched = db.plays.filter((p) => !ids.has(p.game_id) && (p.expansions || []).some((e) => ids.has(e)))
         .map((p) => ({ ...p, expansions: p.expansions.filter((e) => !ids.has(e)) }));
       const logs = gone.map(logDelete);
-      await write([...logs.map(histRec), ...touched.map(playRec)], [...gone.map((p) => p.id), ...ids]);
+      const goneIds = new Set(gone.map((p) => p.id));
+      const pics = db.photos.filter((ph) => goneIds.has(ph.play_id)).map((ph) => `ph-${ph.id}`);
+      await write([...logs.map(histRec), ...touched.map(playRec)], [...gone.map((p) => p.id), ...ids, ...pics]);
+      db.photos = db.photos.filter((ph) => !goneIds.has(ph.play_id));
       db.history.push(...logs);
       db.plays = db.plays.filter((p) => !ids.has(p.game_id)).map((p) => touched.find((t) => t.id === p.id) || p);
       db.games = db.games.filter((g) => !ids.has(g.id));
@@ -221,6 +227,29 @@ export async function createICloudStore() {
       return clone([...latest.values()].filter((h) => h.action === "delete" && !alive.has(h.play_id)).sort((a, b) => b.id - a.id));
     },
 
+    // ----- Photos d'une partie (gardées si la partie est supprimée, pour la restauration) -----
+    async photos(playId) { return clone(sortPhotos(db.photos.filter((ph) => ph.play_id === playId))); },
+    async photoFull(id) {
+      if (!fullCache.has(id)) fullCache.set(id, "data:image/jpeg;base64," + (await CS.image({ name: `ph-${id}` })).data);
+      return fullCache.get(id);
+    },
+    // list : [{ full, thumb }] en data URL JPEG (préparées par l'app). Une opération par photo.
+    async addPhotos(playId, list) {
+      requireAdmin();
+      if (!db.plays.some((p) => p.id === playId)) throw new Error("Partie introuvable");
+      for (const { full, thumb } of list) {
+        const ph = { id: uuid(), play_id: playId, thumb, created_by: st.user, created_at: nowIso() };
+        await CS.modify({ save: [{ ...rec("Photo", `ph-${ph.id}`, ph), image: full.split(",")[1] }], remove: [] });
+        db.photos.push(ph); fullCache.set(ph.id, full);
+      }
+      return list.length;
+    },
+    async deletePhoto(id) {
+      requireAdmin();
+      await write([], [`ph-${id}`]);
+      db.photos = db.photos.filter((ph) => ph.id !== id); fullCache.delete(id);
+    },
+
     // ----- Comptes (les droits se gèrent dans l'écran de partage d'Apple) -----
     async updateProfile(id, patch) {
       requireAdmin();
@@ -269,6 +298,13 @@ export async function createICloudStore() {
     },
   };
   return store;
+}
+
+const sortPhotos = (list) => [...list].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+export function withPhotoCount(plays, photos) {
+  const n = new Map();
+  photos.forEach((ph) => n.set(ph.play_id, (n.get(ph.play_id) || 0) + 1));
+  return plays.map((p) => ({ ...p, photo_count: n.get(p.id) || 0 }));
 }
 
 async function bggCall(body) {

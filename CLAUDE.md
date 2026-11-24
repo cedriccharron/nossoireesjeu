@@ -12,7 +12,7 @@ Langue de l'interface, des commentaires et des échanges : **français**.
   qui embarque une copie du site. Diffusion : **TestFlight d'abord, App Store ensuite**. La PWA reste en ligne.
 - Mode démo automatique quand `js/config.js` est vide (données fictives en localStorage) ou avec `?demo`.
 
-### Bascule vers iCloud (décidée le 24/11/2026, en cours)
+### Bascule vers iCloud (décidée et **faite** le 24/11/2026)
 Cédric a choisi de quitter Supabase pour **iCloud (CloudKit)**, sauf le relais BoardGameGeek. Décisions :
 - **Partage de zone CloudKit** : les données vivent dans une zone personnalisée `CParty` de la base **privée** du
   propriétaire (Cédric), partagée par un `CKShare` de zone. Les invités la lisent dans leur base **partagée**.
@@ -24,7 +24,11 @@ Cédric a choisi de quitter Supabase pour **iCloud (CloudKit)**, sauf le relais 
   l'historique est écrit dans la **même** opération atomique (`CKModifyRecordsOperation`, `isAtomic`).
 - **App iPhone uniquement** pour les vraies données ; le site GitHub Pages ne garde que le mode démo.
 - **Relais BGG** : reste une fonction Supabase, protégée par une clé propre à l'app (plus de comptes Supabase).
-- **Bascule en une fois** : export Supabase (`supabase/export.sql` → `export/*.csv`, vérifié par
+- **Fait le 24/11/2026** : données importées dans iCloud (production) depuis `export/c-party-2026-11-24.csv`
+  (7 joueurs, 1 jeu, 3 parties), build 3 sur TestFlight, schéma CloudKit déployé en production.
+  Le site est passé en démo (`CONFIG.WEB_SUPABASE = false`) avec un message vers l'app. Les tables Supabase restent
+  en l'état (archive figée) ; `store-supabase.js` est conservé pour un éventuel retour arrière.
+- **Méthode suivie** : export Supabase (`supabase/export.sql` → `export/*.csv`, vérifié par
   `supabase/verifier-export.mjs`) puis import dans iCloud. Supabase reste en service jusqu'au feu vert de Cédric.
 
 ## Fichiers

@@ -10,7 +10,7 @@ import {
   globalStats, gameStats, playerStats, filterPlays, PERIODS, autoRanks, isComp, MIN_SAMPLE, monthsBack,
 } from "./stats.js";
 
-const VERSION = "1.0.5 (lot 1)";
+const VERSION = "1.0.6 (lot 1)";
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
@@ -52,7 +52,7 @@ async function boot() {
         <button class="btn primary" onclick="location.reload()">Réessayer</button></div>`;
       return;
     }
-  } else if (!forceDemo && CONFIG.SUPABASE_URL && CONFIG.SUPABASE_ANON_KEY) {
+  } else if (!forceDemo && CONFIG.WEB_SUPABASE && CONFIG.SUPABASE_URL && CONFIG.SUPABASE_ANON_KEY) {
     try {
       const { createSupabaseStore } = await import("./store-supabase.js");
       S.store = await createSupabaseStore();
@@ -63,6 +63,7 @@ async function boot() {
     }
   } else {
     S.store = createDemoStore();
+    S.webOnly = !native; // site web : simple vitrine, les vraies données sont dans l'app iPhone
   }
   document.body.classList.toggle("demo", S.store.mode === "demo");
 
@@ -239,6 +240,11 @@ function monthRows(plays, period) {
   });
 }
 
+// Sur le site web : les vraies parties sont désormais dans l'app iPhone.
+const appNotice = () => S.webOnly ? `<section class="panel demo-panel"><h2>C-Party est une app iPhone</h2>
+  <p class="small">Vos vraies parties sont désormais dans l'app <strong>C-Party</strong>, enregistrées dans iCloud. Ce site n'est plus qu'une démo avec des données fictives.</p>
+  <p class="small">Pour rejoindre ton groupe : installe <strong>TestFlight</strong> depuis l'App Store, ouvre l'invitation C-Party reçue, puis touche le lien de partage envoyé par ton gestionnaire.</p></section>` : "";
+
 function viewHome() {
   const plays = filterPlays(S.data.plays, { period: S.ui.period });
   const st = globalStats(S.data, plays);
@@ -252,7 +258,7 @@ function viewHome() {
     </div>` + fab("#/plays/new", "Nouvelle partie");
   }
   const myPlayer = S.data.me.player_id && player(S.data.me.player_id);
-  return header("C-Party", { sub: myPlayer ? `Bonjour ${esc(myPlayer.name)}` : "" }) + `
+  return header("C-Party", { sub: myPlayer ? `Bonjour ${esc(myPlayer.name)}` : "" }) + appNotice() + `
     ${periodChips()}
     <section class="kpis">
       ${kpi("parties", fmtNum(st.count), st.learning ? `dont ${st.learning} d'apprentissage` : "")}

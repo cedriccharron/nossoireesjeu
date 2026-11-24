@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>C-Party · Confidentialité</title>
+  <meta name="description" content="Politique de confidentialité de l'app C-Party.">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <style>
+    :root { --bg: #f6f4ef; --ink: #1d1d1b; --muted: #6b6a66; --card: #ffffff; --accent: #2a78d6; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #151514; --ink: #f1efea; --muted: #a3a19b; --card: #1f1f1d; --accent: #6aa7f0; } }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    main { max-width: 680px; margin: 0 auto; padding: 32px 16px 48px; }
+    header { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
+    header img { width: 56px; height: 56px; border-radius: 13px; }
+    h1 { font-size: 26px; margin: 0; }
+    h2 { font-size: 18px; margin: 28px 0 6px; }
+    p, li { color: var(--ink); }
+    .muted { color: var(--muted); font-size: 14px; }
+    section { background: var(--card); border-radius: 14px; padding: 4px 18px 14px; margin-top: 16px; }
+    a { color: var(--accent); }
+    ul { padding-left: 20px; }
+  </style>
+</head>
+<body>
+<main>
+  <header><img src="icons/icon-192.png" alt=""><div><h1>Politique de confidentialité</h1><div class="muted">C-Party · mise à jour le 24 novembre 2026</div></div></header>
+
+  <p>C-Party est une app gratuite et sans publicité qui permet à un groupe d'amis d'enregistrer ses parties de jeux de société et d'en tirer des statistiques. Elle est conçue pour collecter le moins de données possible.</p>
+
+  <section>
+    <h2>Où sont vos données ?</h2>
+    <p>Toutes les données saisies dans C-Party (joueurs, jeux, parties, scores, commentaires) sont enregistrées dans <strong>iCloud</strong>, le service d'Apple :</p>
+    <ul>
+      <li>dans le compte iCloud de la personne qui a créé le groupe ;</li>
+      <li>partagées uniquement avec les personnes qu'elle a invitées, via le partage iCloud d'Apple.</li>
+    </ul>
+    <p>Le développeur de C-Party <strong>n'a pas accès</strong> à ces données et ne les reçoit à aucun moment. Leur stockage est régi par les <a href="https://www.apple.com/fr/legal/privacy/">règles de confidentialité d'Apple</a>.</p>
+  </section>
+
+  <section>
+    <h2>Ce que l'app connaît de vous</h2>
+    <ul>
+      <li><strong>Votre identifiant iCloud</strong> (un code anonyme fourni par Apple) et le nom affiché que vous choisissez, pour vous reconnaître dans le groupe.</li>
+      <li>Si vous êtes invité, votre nom et l'adresse ou le numéro utilisés pour l'invitation sont visibles par le créateur du groupe, comme pour tout partage iCloud.</li>
+    </ul>
+    <p>C-Party ne demande ni mot de passe, ni localisation, ni contacts, ni photos.</p>
+  </section>
+
+  <section>
+    <h2>Recherche de jeux (BoardGameGeek)</h2>
+    <p>Quand vous cherchez un jeu, le nom tapé ou le numéro du jeu est transmis à <a href="https://boardgamegeek.com">BoardGameGeek</a> par l'intermédiaire d'un petit serveur relais. Aucune donnée personnelle n'est jointe et rien n'est conservé.</p>
+  </section>
+
+  <section>
+    <h2>Ce que C-Party ne fait pas</h2>
+    <ul>
+      <li>Aucun suivi publicitaire, aucune mesure d'audience, aucune revente de données.</li>
+      <li>Aucun partage avec des tiers, en dehors d'Apple (iCloud) et de BoardGameGeek (recherche de jeux).</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Supprimer vos données</h2>
+    <ul>
+      <li><strong>Membre invité</strong> : Plus → « Quitter le groupe ». Vous n'avez plus accès aux données du groupe.</li>
+      <li><strong>Créateur du groupe</strong> : Plus → « Supprimer le groupe et ses données ». Tout est effacé de votre iCloud, pour tous les membres.</li>
+      <li>Vous pouvez aussi gérer les données des apps dans Réglages → [votre nom] → iCloud.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Contact</h2>
+    <p>Pour toute question, utilisez le bouton « Envoyer un commentaire » de l'app TestFlight, ou contactez le créateur de votre groupe.</p>
+  </section>
+
+  <p class="muted">Données de jeux : BoardGameGeek, usage non commercial.</p>
+</main>
+</body>
+</html>

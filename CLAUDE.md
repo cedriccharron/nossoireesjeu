@@ -12,6 +12,21 @@ Langue de l'interface, des commentaires et des échanges : **français**.
   qui embarque une copie du site. Diffusion : **TestFlight d'abord, App Store ensuite**. La PWA reste en ligne.
 - Mode démo automatique quand `js/config.js` est vide (données fictives en localStorage) ou avec `?demo`.
 
+### Bascule vers iCloud (décidée le 24/11/2026, en cours)
+Cédric a choisi de quitter Supabase pour **iCloud (CloudKit)**, sauf le relais BoardGameGeek. Décisions :
+- **Partage de zone CloudKit** : les données vivent dans une zone personnalisée `CParty` de la base **privée** du
+  propriétaire (Cédric), partagée par un `CKShare` de zone. Les invités la lisent dans leur base **partagée**.
+  Droit `readWrite` = gestionnaire (`admin`), `readOnly` = joueur (`viewer`). Le propriétaire est toujours admin.
+- **Plus de mots de passe ni d'e-mails** : identité = identifiant Apple ; invitations et droits gérés par l'écran
+  de partage natif d'Apple (`UICloudSharingController`). Fiche `Member` par participant (nom affiché, `player_id`).
+- **Enregistrements** : un type par entité (`Player`, `Game`, `Play`, `History`, `Member`), un champ `json` qui
+  contient l'objet complet. Une partie embarque ses joueurs et ses extensions → enregistrement atomique ;
+  l'historique est écrit dans la **même** opération atomique (`CKModifyRecordsOperation`, `isAtomic`).
+- **App iPhone uniquement** pour les vraies données ; le site GitHub Pages ne garde que le mode démo.
+- **Relais BGG** : reste une fonction Supabase, protégée par une clé propre à l'app (plus de comptes Supabase).
+- **Bascule en une fois** : export Supabase (`supabase/export.sql` → `export/*.csv`, vérifié par
+  `supabase/verifier-export.mjs`) puis import dans iCloud. Supabase reste en service jusqu'au feu vert de Cédric.
+
 ## Fichiers
 | Fichier | Rôle |
 | --- | --- |
@@ -19,11 +34,15 @@ Langue de l'interface, des commentaires et des échanges : **français**.
 | `sw.js` | Service worker. **Incrémenter `VERSION` à chaque mise en ligne** pour forcer la mise à jour des iPhone |
 | `js/app.js` | Navigation (hash `#/…`), écrans, formulaires, actions. Constante `VERSION` affichée dans Plus |
 | `js/stats.js` | Calcul des statistiques (tout est recalculé depuis les parties, rien n'est stocké) |
-| `js/store-supabase.js` / `js/store-demo.js` | Deux implémentations de la **même interface** de stockage — toute nouvelle fonction doit exister dans les deux |
+| `js/store-icloud.js` / `js/store-supabase.js` / `js/store-demo.js` | Trois implémentations de la **même interface** de stockage — toute nouvelle fonction doit exister dans les trois. iCloud = app iPhone (logique métier en JS, calquée sur la démo) |
+| `app-ios/ios/App/App/CloudStore.swift` | Module natif `CloudStore` : statut iCloud, lecture de la zone, écriture atomique, écran de partage Apple, acceptation des invitations |
+| `js/secrets.js` | **Exclu de Git.** `BGG_APP_KEY`, identique au secret Supabase `APP_KEY` du relais BGG |
+| `tests/store-icloud.test.mjs` | Test du stockage iCloud avec un faux iCloud : `node tests/store-icloud.test.mjs` |
+| `supabase/export.sql`, `supabase/verifier-export.mjs` | Export complet en un CSV (`table`, `id`, `donnees` JSON) et son contrôle ; l'import se fait dans l'app (Plus) |
 | `js/util.js`, `js/icons.js` | Formatage FR, libellés, icônes SVG |
 | `js/config.js` | URL Supabase + clé publishable (publique, normal qu'elle soit dans le dépôt) |
 | `supabase/schema.sql` | Schéma complet, **rejouable sans perte** (`if not exists`, `drop policy if exists`) |
-| `supabase/functions/bgg/` | Relais API XML BoardGameGeek (jeton `BGG_TOKEN` en secret Supabase), vérifie que l'appelant est connecté |
+| `supabase/functions/bgg/` | Relais API XML BoardGameGeek (secrets `BGG_TOKEN` et `APP_KEY`) ; accepte l'en-tête `x-app-key` ou un compte Supabase connecté |
 | `supabase/functions/invite/` | Invitation d'un compte par un gestionnaire (clé secrète côté serveur) |
 | `app-ios/` | App iOS Capacitor (bundle `com.cedriccharron.nossoireesjeu`, nom affiché « C-Party », iPhone seul, portrait). `npm run sync` recopie le site dans `www/` puis dans le projet Xcode ; `npm run ouvrir` ouvre Xcode |
 
@@ -69,5 +88,9 @@ Langue de l'interface, des commentaires et des échanges : **français**.
 - Avant de proposer une mise en ligne : vérifier en mode démo, incrémenter `VERSION` dans `sw.js` et `js/app.js`.
 - App iOS : après toute modification du site, `cd app-ios && npm run sync`, puis augmenter le numéro de build dans Xcode
   avant chaque envoi TestFlight. Les liens d'e-mail pointent toujours vers le site public (`webUrl()` dans `store-supabase.js`).
-- Pour l'examen App Store (étape 2) il faudra : suppression de compte dans l'app, politique de confidentialité, compte de démo.
+- Pour l'examen App Store (étape 2) il faudra : politique de confidentialité, captures, compte de démo (un iCloud de test
+  invité dans un groupe de démo). La « suppression de compte » = Plus → Quitter / Supprimer le groupe.
+- **CloudKit** : en développement (Xcode), les types d'enregistrement se créent seuls. **Avant tout envoi TestFlight**,
+  déployer le schéma en Production (CloudKit Console → conteneur `iCloud.com.cedriccharron.nossoireesjeu` → Deploy Schema Changes).
+- Le simulateur n'a pas de compte iCloud par défaut : Cédric doit s'y connecter lui-même (Réglages du simulateur).
 - Expliquer à Cédric les étapes manuelles (Supabase, GitHub) pas à pas, en français.

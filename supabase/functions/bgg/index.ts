@@ -3,7 +3,7 @@
 //   { "q": "Azul" }               -> [{ id, name, year, expansion }]
 //   { "ids": [230802, 13] }       -> [fiche jeu, ...]   (20 maximum par appel)
 //   { "collection": "pseudo" }    -> { pending } ou { items: [{ id, expansion }] }
-// Secret requis : BGG_TOKEN   (supabase secrets set BGG_TOKEN=...)
+// Secrets requis : BGG_TOKEN (jeton BGG) et APP_KEY (clé de l'app iPhone C-Party, voir js/secrets.js)
 
 import { XMLParser } from "npm:fast-xml-parser@4.5.0";
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -11,7 +11,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 const BGG = "https://boardgamegeek.com/xmlapi2";
 const cors = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-key",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
@@ -127,8 +127,21 @@ async function collection(user: string) {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
 
-// Seuls les comptes connectés à NosSoireesJeu peuvent utiliser le jeton BGG.
+// Accès autorisé : l'app iPhone C-Party (clé APP_KEY dans l'en-tête x-app-key),
+// ou un compte Supabase connecté (ancienne version web, le temps de la bascule vers iCloud).
+function sameKey(a: string, b: string): boolean {
+  if (!a || !b || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+async function allowed(req: Request): Promise<boolean> {
+  if (sameKey(req.headers.get("x-app-key") ?? "", Deno.env.get("APP_KEY") ?? "")) return true;
+  return await signedIn(req);
+}
+
 async function signedIn(req: Request): Promise<boolean> {
+  if (!req.headers.get("Authorization")) return false;
   let pub = "";
   try { pub = JSON.parse(Deno.env.get("SUPABASE_PUBLISHABLE_KEYS") ?? "{}").default ?? ""; } catch { /* absent */ }
   pub ||= Deno.env.get("SUPABASE_ANON_KEY") ?? "";
@@ -142,7 +155,7 @@ async function signedIn(req: Request): Promise<boolean> {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   try {
-    if (!(await signedIn(req))) return json({ error: "Connexion requise" }, 401);
+    if (!(await allowed(req))) return json({ error: "Accès refusé" }, 401);
     const url = new URL(req.url);
     const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
     const q = body.q ?? url.searchParams.get("q");

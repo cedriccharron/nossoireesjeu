@@ -41,7 +41,18 @@ async function boot() {
   if (["invite", "recovery"].includes(hash.get("type"))) S.pendingAuth = hash.get("type");
   if (hash.get("error_description")) toast(hash.get("error_description").replace(/\+/g, " "), "error");
 
-  if (!forceDemo && CONFIG.SUPABASE_URL && CONFIG.SUPABASE_ANON_KEY) {
+  const native = !!window.Capacitor?.isNativePlatform?.();
+  if (!forceDemo && native) {
+    try {
+      const { createICloudStore, icloudAvailable } = await import("./store-icloud.js");
+      if (!icloudAvailable()) throw new Error("Module iCloud absent de l'app");
+      S.store = await createICloudStore();
+    } catch (e) {
+      $("#main").innerHTML = `<div class="empty"><p>Impossible d'accéder à iCloud.</p><p class="muted">${esc(e.message)}</p>
+        <button class="btn primary" onclick="location.reload()">Réessayer</button></div>`;
+      return;
+    }
+  } else if (!forceDemo && CONFIG.SUPABASE_URL && CONFIG.SUPABASE_ANON_KEY) {
     try {
       const { createSupabaseStore } = await import("./store-supabase.js");
       S.store = await createSupabaseStore();
@@ -56,10 +67,12 @@ async function boot() {
   document.body.classList.toggle("demo", S.store.mode === "demo");
 
   const { session } = await S.store.init();
-  S.store.onAuth(async (event) => {
+  S.store.onAuth(async (event, detail) => {
     if (event === "PASSWORD_RECOVERY") { S.pendingAuth = "recovery"; render(); }
     if (event === "SIGNED_OUT") { S.data = null; render(); }
     if (event === "SIGNED_IN" && !S.data) await reload();
+    if (event === "SPACE_CHANGED") { if (S.store.status()?.space) await reload(); else { S.data = null; render(); } }
+    if (event === "SHARING_ERROR") toast(detail || "Le partage a échoué", "error");
   });
   if (session) await reload();
   else render();
@@ -91,7 +104,7 @@ function render() {
   if (S.pendingAuth && S.store.mode === "cloud") { nav.hidden = true; main.innerHTML = viewSetPassword(); return; }
   if (!S.data) {
     nav.hidden = true;
-    main.innerHTML = S.store.mode === "cloud" ? viewLogin() : `<div class="loading">Chargement…</div>`;
+    main.innerHTML = S.store.mode === "cloud" ? viewLogin() : S.store.mode === "icloud" ? viewICloudSetup() : `<div class="loading">Chargement…</div>`;
     return;
   }
   nav.hidden = false;
@@ -912,10 +925,11 @@ function viewMore() {
     <section class="panel"><h2>Mon compte</h2>
       <form class="form compact" data-form="myname">
         <label class="field"><span>Nom affiché</span><input name="name" value="${esc(me.display_name || "")}" maxlength="60"></label>
-        <p class="small muted">${esc(me.email || "")} · ${me.role === "admin" ? "Gestionnaire" : "Joueur (consultation)"}${me.player_id && player(me.player_id) ? ` · fiche « ${esc(player(me.player_id).name)} »` : ""}</p>
+        <p class="small muted">${esc(me.email || "")}${me.email ? " · " : ""}${me.owner ? "Propriétaire · " : ""}${me.role === "admin" ? "Gestionnaire" : "Joueur (consultation)"}${me.player_id && player(me.player_id) ? ` · fiche « ${esc(player(me.player_id).name)} »` : ""}</p>
         <div class="form-actions"><button class="btn small" type="submit">Enregistrer</button></div>
       </form></section>
-    ${isAdmin() ? `<section class="panel"><h2>Comptes</h2>
+    ${S.store.mode === "icloud" ? viewICloudAccounts(profiles) : ""}
+    ${isAdmin() && S.store.mode !== "icloud" ? `<section class="panel"><h2>Comptes</h2>
       <ul class="accounts">${profiles.map((p) => `<li>
         <div><strong>${esc(p.display_name || p.email)}</strong><div class="muted small">${esc(p.email || "")}</div></div>
         <select data-profile-role="${p.id}" aria-label="Rôle"><option value="admin" ${p.role === "admin" ? "selected" : ""}>Gestionnaire</option><option value="viewer" ${p.role === "viewer" ? "selected" : ""}>Joueur</option></select>
@@ -932,13 +946,33 @@ function viewMore() {
         <p class="form-error" id="form-error" role="alert"></p>
         <div class="form-actions"><button class="btn primary" type="submit">${icon("mail", 18)} Envoyer l'invitation</button></div>
       </form></section>` : ""}
-    ${!standalone ? `<section class="panel"><h2>Installer sur l'iPhone</h2>
+    ${!standalone && S.store.mode !== "icloud" ? `<section class="panel"><h2>Installer sur l'iPhone</h2>
       <ol class="small steps"><li>Ouvre cette page dans <strong>Safari</strong>.</li><li>Touche le bouton <strong>Partager</strong> ${icon("share", 16)}.</li>
       <li>Choisis <strong>Sur l'écran d'accueil</strong>, puis <strong>Ajouter</strong>.</li></ol></section>` : ""}
     <section class="panel small"><h2>À propos</h2>
       <p>C-Party · version ${VERSION}</p>
       <p class="muted">Données de jeux : <a href="https://boardgamegeek.com" target="_blank" rel="noopener">BoardGameGeek</a>, usage non commercial.</p></section>
     ${S.store.mode === "cloud" ? `<p class="center"><button class="btn ghost" data-action="logout">${icon("logout", 18)} Se déconnecter</button></p>` : ""}`;
+}
+
+function viewICloudAccounts(profiles) {
+  const me = S.data.me;
+  const empty = !S.data.plays.length && !S.data.games.length && !S.data.players.length;
+  return `${isAdmin() ? `<section class="panel"><h2>Membres du groupe</h2>
+      <ul class="accounts">${profiles.map((p) => `<li>
+        <div><strong>${esc(p.display_name)}</strong><div class="muted small">${p.owner ? "Propriétaire" : p.role === "admin" ? "Gestionnaire" : "Joueur"}${p.pending ? " · invitation en attente" : ""}${p.email ? ` · ${esc(p.email)}` : ""}</div></div>
+        <select data-profile-player="${p.id}" aria-label="Fiche joueur liée"><option value="">Aucune fiche</option>${S.data.players.map((x) => `<option value="${x.id}" ${x.id === p.player_id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>
+      </li>`).join("")}</ul>
+      ${me.owner ? `<p class="small muted">Invite les joueurs par Messages ou par e-mail. Choisis « Lecture seule » pour un joueur, « Modifications autorisées » pour un gestionnaire.</p>
+      <div class="form-actions"><button class="btn primary" data-action="icloud-share">${icon("share", 18)} Inviter et gérer les droits</button></div>`
+      : `<p class="small muted">Seul le propriétaire du groupe peut inviter ou changer les droits.</p>`}</section>` : ""}
+    ${me.owner && empty ? `<section class="panel"><h2>Importer les anciennes données</h2>
+      <p class="small">Choisis le fichier CSV exporté de Supabase (supabase/export.sql). L'import n'est possible que dans un espace vide.</p>
+      <label class="btn block">${icon("download", 18)} Choisir le fichier CSV<input type="file" accept=".csv,text/csv" data-import-csv hidden></label>
+      <p class="small muted" id="import-status"></p></section>` : ""}
+    <section class="panel"><h2>${me.owner ? "Supprimer le groupe" : "Quitter le groupe"}</h2>
+      <p class="small">${me.owner ? "Supprime définitivement l'espace C-Party de ton iCloud : toutes les parties, jeux et joueurs, pour tous les membres." : "Tu n'auras plus accès aux parties de ce groupe. Les données du groupe ne sont pas supprimées."}</p>
+      <div class="form-actions"><button class="btn danger ghost" data-action="icloud-leave">${me.owner ? "Supprimer le groupe et ses données" : "Quitter le groupe"}</button></div></section>`;
 }
 
 // ---------- Connexion ------------------------------------------------------
@@ -963,6 +997,24 @@ function viewSetPassword() {
       <p class="form-error" id="form-error" role="alert"></p>
       <button class="btn primary block" type="submit">Valider</button>
     </form></div>`;
+}
+
+function viewICloudSetup() {
+  const st = S.store.status() || {};
+  const head = `<div class="auth"><img src="icons/icon-192.png" alt="" width="84" height="84"><h1>C-Party</h1>`;
+  if (st.account !== "available") return head + `
+    <p class="muted center">C-Party enregistre vos parties dans <strong>iCloud</strong>.</p>
+    <ol class="small steps"><li>Ouvre <strong>Réglages</strong> sur ton iPhone.</li><li>Touche ton nom en haut, puis <strong>iCloud</strong>.</li>
+      <li>Connecte-toi avec ton identifiant Apple, puis reviens ici.</li></ol>
+    <button class="btn primary block" data-action="icloud-retry">Réessayer</button></div>`;
+  return head + `
+    <p class="muted center">Bienvenue ! Pour commencer :</p>
+    <section class="panel"><h2>Tu as reçu une invitation ?</h2>
+      <p class="small">Touche le lien reçu par Messages ou par e-mail : C-Party s'ouvrira sur les parties de ton groupe.</p></section>
+    <section class="panel"><h2>Tu crées le groupe ?</h2>
+      <p class="small">Les données seront rangées dans ton iCloud. Tu pourras ensuite inviter les autres joueurs.</p>
+      <button class="btn primary block" data-action="icloud-create">Créer l'espace de mon groupe</button></section>
+    <p class="center"><button class="btn small ghost" data-action="icloud-retry">Actualiser</button></p></div>`;
 }
 
 // ---------- Actions (clics) -------------------------------------------------
@@ -1081,6 +1133,23 @@ const actions = {
     if (!(await confirmDialog("Remettre les données de démo à zéro ?", "Réinitialiser"))) return;
     S.store.reset(); await reload(); go("#/");
   },
+  "icloud-retry": async () => {
+    try { const st = await S.store.refreshStatus(); if (st.space) await reload(); else render(); } catch (e) { toast(e.message, "error"); }
+  },
+  "icloud-create": async (el) => {
+    el.disabled = true;
+    try { await S.store.createSpace(); await reload(); toast("Espace créé"); go("#/more"); } catch (e) { el.disabled = false; toast(e.message, "error"); }
+  },
+  "icloud-share": async () => { try { await S.store.manageSharing(); } catch (e) { toast(e.message, "error"); } },
+  "icloud-leave": async () => {
+    const owner = S.data.me.owner;
+    const ok = await confirmDialog(owner
+      ? "Supprimer le groupe ? Toutes les parties, jeux et joueurs seront effacés de ton iCloud, pour tous les membres. C'est définitif."
+      : "Quitter le groupe ? Tu pourras revenir seulement avec une nouvelle invitation.",
+      owner ? "Supprimer définitivement" : "Quitter");
+    if (!ok) return;
+    try { await S.store.leaveSpace(); S.data = null; go("#/"); render(); toast(owner ? "Groupe supprimé" : "Tu as quitté le groupe"); } catch (e) { toast(e.message, "error"); }
+  },
   logout: async () => { await S.store.signOut(); S.data = null; render(); },
   forgot: async () => {
     const email = $("[name=email]").value.trim();
@@ -1122,6 +1191,21 @@ document.addEventListener("change", async (e) => {
   const t = e.target;
   if (t.dataset.imp) { const it = S.importer.items.find((i) => String(i.id) === t.dataset.imp); if (it) it.checked = t.checked; return; }
   if (t.dataset.actionChange === "status") { $("#lent-field").hidden = t.value !== "lent"; return; }
+  if ("importCsv" in t.dataset && t.files?.[0]) {
+    const out = $("#import-status");
+    try {
+      const { tablesFromExport } = await import("./store-icloud.js");
+      const tables = tablesFromExport(await t.files[0].text());
+      const n = (k) => (tables[k] || []).length;
+      if (!(await confirmDialog(`Importer ${plural(n("plays"), "partie", "parties")}, ${plural(n("games"), "jeu", "jeux")} et ${plural(n("players"), "joueur", "joueurs")} dans iCloud ?`, "Importer"))) { t.value = ""; return; }
+      if (out) out.textContent = "Import en cours… ne ferme pas l'app.";
+      const r = await S.store.importExport(tables);
+      toast(`Import terminé : ${plural(r.plays, "partie", "parties")}`);
+      await reload();
+    } catch (err) { if (out) out.textContent = ""; toast(err.message, "error"); }
+    t.value = "";
+    return;
+  }
   if (t.dataset.profileRole || t.dataset.profilePlayer) {
     const id = t.dataset.profileRole || t.dataset.profilePlayer;
     const patch = t.dataset.profileRole ? { role: t.value } : { player_id: t.value || null };

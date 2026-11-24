@@ -293,7 +293,7 @@ input[type="checkbox"] { width: 20px; height: 20px; }
 .accounts li:first-child { border-top: 0; }
 .accounts li > div { grid-column: 1 / -1; }
 .accounts select { padding: 7px 28px 7px 10px; font-size: 14px; }
-.steps { padding-left: 20px; margin: 0; }
+.steps { padding-left: 20px; margin: 0; text-align: left; }
 .steps li { margin: 4px 0; }
 .demo-panel { background: var(--accent-soft); box-shadow: none; }
 .demo-panel .seg { background: var(--surface); margin: 8px 0; }

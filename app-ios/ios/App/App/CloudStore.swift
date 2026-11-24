@@ -209,11 +209,16 @@ public class CloudStorePlugin: CAPPlugin, CAPBridgedPlugin, UICloudSharingContro
         run(call) {
             let a = try await self.space.requireActive()
             guard let share = try await self.space.zoneShare(a) else { return ["participants": []] }
+            let me = try await self.space.container.userRecordID().recordName
             let list: [[String: Any]] = share.participants.map { p in
+                // Le propriétaire (ou l'utilisateur courant) peut apparaître sous « __defaultOwner__ » :
+                // on renvoie toujours le vrai identifiant, celui que donne status().
+                var user = p.userIdentity.userRecordID?.recordName ?? ""
+                if user == CKCurrentUserDefaultName || p == share.currentUserParticipant { user = me }
                 let n = p.userIdentity.nameComponents
                 let name = n.map { PersonNameComponentsFormatter.localizedString(from: $0, style: .default) } ?? ""
                 return [
-                    "user": p.userIdentity.userRecordID?.recordName ?? "",
+                    "user": user,
                     "name": name,
                     "email": p.userIdentity.lookupInfo?.emailAddress ?? "",
                     "owner": p.role == .owner,

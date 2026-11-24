@@ -64,8 +64,13 @@ export async function createICloudStore() {
 
   function profiles() {
     const member = (u) => db.members.find((m) => m.id === u) || {};
-    const list = participants.length ? participants : [{ user: st.user, name: "", email: "", owner: st.space?.owner, permission: st.space?.permission, accepted: true }];
-    return list.filter((p) => p.user).map((p) => ({
+    // iCloud désigne parfois l'utilisateur courant par « __defaultOwner__ » : on le ramène à son vrai identifiant.
+    const realId = (u) => (u === "__defaultOwner__" || !u ? st.user : u);
+    const list = participants.length
+      ? participants.map((p) => ({ ...p, user: realId(p.user) }))
+      : [{ user: st.user, name: "", email: "", owner: st.space?.owner, permission: st.space?.permission, accepted: true }];
+    const seen = new Set();
+    return list.filter((p) => p.user && !seen.has(p.user) && seen.add(p.user)).map((p) => ({
       id: p.user,
       email: p.email || "",
       display_name: member(p.user).display_name || p.name || (p.owner ? "Propriétaire" : "Invité"),

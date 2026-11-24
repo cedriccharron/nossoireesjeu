@@ -969,8 +969,12 @@ function viewICloudAccounts(profiles) {
         <div><strong>${esc(p.display_name)}</strong><div class="muted small">${p.owner ? "Propriétaire" : p.role === "admin" ? "Gestionnaire" : "Joueur"}${p.pending ? " · invitation en attente" : ""}${p.email ? ` · ${esc(p.email)}` : ""}</div></div>
         <select data-profile-player="${p.id}" aria-label="Fiche joueur liée"><option value="">Aucune fiche</option>${S.data.players.map((x) => `<option value="${x.id}" ${x.id === p.player_id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>
       </li>`).join("")}</ul>
-      ${me.owner ? `<p class="small muted">Invite les joueurs par Messages ou par e-mail. Choisis « Lecture seule » pour un joueur, « Modifications autorisées » pour un gestionnaire.</p>
-      <div class="form-actions"><button class="btn primary" data-action="icloud-share">${icon("share", 18)} Inviter et gérer les droits</button></div>`
+      ${me.owner ? `<h3>Inviter quelqu'un</h3>
+      <p class="small muted">Choisis le rôle, puis envoie le lien par Messages ou par e-mail. La personne doit avoir installé C-Party, puis toucher le lien sur son iPhone.</p>
+      <div class="row-gap"><button class="btn primary" data-action="icloud-invite" data-role="viewer">${icon("share", 18)} Inviter un joueur</button>
+        <button class="btn" data-action="icloud-invite" data-role="admin">${icon("share", 18)} Inviter un gestionnaire</button></div>
+      <p class="small muted">Joueur : consulte tout. Gestionnaire : saisit, modifie et supprime.</p>
+      ${profiles.length > 1 ? `<p class="center"><button class="btn small ghost" data-action="icloud-share">Gérer les membres (droits, retrait)</button></p>` : ""}`
       : `<p class="small muted">Seul le propriétaire du groupe peut inviter ou changer les droits.</p>`}</section>` : ""}
     ${me.owner && empty ? `<section class="panel"><h2>Importer les anciennes données</h2>
       <p class="small">Choisis le fichier CSV exporté de Supabase (supabase/export.sql). L'import n'est possible que dans un espace vide.</p>
@@ -1146,6 +1150,7 @@ const actions = {
     el.disabled = true;
     try { await S.store.createSpace(); await reload(); toast("Espace créé"); go("#/more"); } catch (e) { el.disabled = false; toast(e.message, "error"); }
   },
+  "icloud-invite": async (el) => { try { await S.store.invite({ role: el.dataset.role }); } catch (e) { toast(e.message, "error"); } },
   "icloud-share": async () => { try { await S.store.manageSharing(); } catch (e) { toast(e.message, "error"); } },
   "icloud-leave": async () => {
     const owner = S.data.me.owner;

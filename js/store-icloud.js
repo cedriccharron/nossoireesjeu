@@ -233,7 +233,8 @@ export async function createICloudStore() {
       if (!canWrite()) throw new Error("Demande à un gestionnaire de changer ton nom affiché");
       await store.updateProfile(st.user, { display_name: name });
     },
-    async invite() { await CS.manageSharing(); return { ok: true }; },
+    // role : "viewer" (lecture seule) ou "admin" (modifications autorisées) ; l'autorisation est fixée par l'app.
+    async invite({ role } = {}) { await CS.invite({ role: role === "admin" ? "readWrite" : "readOnly" }); return { ok: true }; },
 
     // ----- Import d'un export Supabase (supabase/export.sql) -----
     async importExport(tables) {

@@ -4,6 +4,7 @@
 import { readFileSync } from "node:fs";
 // Faux module natif : un iCloud en mémoire, avec écritures atomiques et droits.
 const cloud = new Map(); let calls = 0; let permission = "readWrite", owner = true, space = true;
+let lastInvite = null;
 let participantsList = [{ user: "_moi", name: "Cédric", owner: true, permission: "readWrite", accepted: true }, { user: "_ami", name: "Léa", owner: false, permission: "readOnly", accepted: false }];
 globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
 globalThis.window = { Capacitor: { isNativePlatform: () => true, Plugins: { CloudStore: {
@@ -17,6 +18,7 @@ globalThis.window = { Capacitor: { isNativePlatform: () => true, Plugins: { Clou
     if (save.length > 400 || remove.length > 400) throw new Error("trop d'enregistrements");
     save.forEach((r) => cloud.set(r.name, r)); remove.forEach((n) => cloud.delete(n));
   },
+  async invite({ role }) { lastInvite = role; },
   async participants() { return { participants: participantsList }; },
 }}}};
 const { createICloudStore, tablesFromExport, icloudAvailable } = await import("../js/store-icloud.js");
@@ -80,4 +82,6 @@ ok(d.profiles.filter((p) => p.owner).length === 1 && d.profiles.find((p) => p.ow
 await s.updateProfile(d.me.id, { player_id: d.players[0].id });
 d = await s.loadAll();
 ok(d.me.player_id === d.players[0].id && d.me.display_name === "Cédric", "fiche liée sans perdre le nom");
+await s.invite({ role: "viewer" }); ok(lastInvite === "readOnly", "inviter un joueur = lecture seule");
+await s.invite({ role: "admin" }); ok(lastInvite === "readWrite", "inviter un gestionnaire = modifications autorisées");
 console.log("\nTous les tests passent.");

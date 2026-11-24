@@ -147,6 +147,7 @@ public class CloudStorePlugin: CAPPlugin, CAPBridgedPlugin, UICloudSharingContro
         CAPPluginMethod(name: "modify", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "participants", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "manageSharing", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "invite", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "leaveSpace", returnType: CAPPluginReturnPromise),
     ]
 
@@ -243,6 +244,42 @@ public class CloudStorePlugin: CAPPlugin, CAPBridgedPlugin, UICloudSharingContro
                     guard let vc = self.bridge?.viewController else { call.reject("Écran indisponible"); return }
                     c.popoverPresentationController?.sourceView = vc.view
                     vc.present(c, animated: true) { call.resolve() }
+                }
+            } catch {
+                call.reject(Self.message(for: error), nil, error)
+            }
+        }
+    }
+
+    /// Envoie une invitation dont l'autorisation est fixée par l'app :
+    /// role = "readOnly" (joueur) ou "readWrite" (gestionnaire). Accès réservé aux personnes invitées.
+    @objc func invite(_ call: CAPPluginCall) {
+        let readWrite = call.getString("role") == "readWrite"
+        Task {
+            do {
+                let a = try await space.requireActive()
+                guard a.isOwner else {
+                    throw NSError(domain: "CParty", code: 2, userInfo: [NSLocalizedDescriptionKey: "Seul le propriétaire du groupe peut inviter"])
+                }
+                let share = try await space.shareForSharing(a)
+                await MainActor.run {
+                    guard let vc = self.bridge?.viewController else { call.reject("Écran indisponible"); return }
+                    let sheet: UIViewController
+                    if #available(iOS 16.0, *) {
+                        let provider = NSItemProvider()
+                        let options = CKAllowedSharingOptions(
+                            allowedParticipantPermissionOptions: readWrite ? .readWrite : .readOnly,
+                            allowedParticipantAccessOptions: .specifiedRecipientsOnly)
+                        provider.registerCKShare(share, container: self.space.container, allowedSharingOptions: options)
+                        sheet = UIActivityViewController(activityItemsConfiguration: UIActivityItemsConfiguration(itemProviders: [provider]))
+                    } else {
+                        let c = UICloudSharingController(share: share, container: self.space.container)
+                        c.availablePermissions = [.allowPrivate, readWrite ? .allowReadWrite : .allowReadOnly]
+                        c.delegate = self
+                        sheet = c
+                    }
+                    sheet.popoverPresentationController?.sourceView = vc.view
+                    vc.present(sheet, animated: true) { call.resolve() }
                 }
             } catch {
                 call.reject(Self.message(for: error), nil, error)

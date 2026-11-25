@@ -79,6 +79,7 @@ Cédric a choisi de quitter Supabase pour **iCloud (CloudKit)**, sauf le relais 
 - **Lot 3** : saisie hors-ligne (file d'attente locale, envoi à l'ouverture), notifications push
   (nouvelle partie, record battu ; iOS ≥ 16.4), carte résultat partageable, export CSV (séparateur `;`) + JSON,
   GitHub Action quotidienne anti-mise-en-veille Supabase + sauvegarde hebdomadaire.
+- **Synchronisation BGG** (v1.1.1, écran `#/games/import`) : nouveaux jeux, fiches à compléter (champs vides seulement, association des jeux saisis à la main par le nom, `bgg_synced_at` pour ne pas reproposer), jeux retirés de BGG → « joué ailleurs » au choix. Jamais de suppression ni de changement de nom/pochette. Fonctionne dès que le relais `bgg` est déployé (jeton BGG).
 - Idées en attente : statut « invitation en attente / activé » et date de dernière ouverture dans Plus → Comptes ;
   bouton « Compléter avec BGG » pour les jeux saisis à la main.
 

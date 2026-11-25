@@ -383,3 +383,5 @@ body.no-scroll { overflow: hidden; }
 .elo-line { margin: 10px 0 0; line-height: 1.6; }
 .perf { flex-wrap: wrap; }
 .perf > .explain { flex-basis: 100%; margin-top: 0; }
+.sync-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sync-h .row-gap { display: flex; gap: 6px; text-transform: none; letter-spacing: 0; }

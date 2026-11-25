@@ -11,7 +11,7 @@ import {
   eloForGame, headToHead, nemesis, favouriteVictim, ELO_START,
 } from "./stats.js";
 
-const VERSION = "1.1.0 (lot 2)";
+const VERSION = "1.1.1 (lot 2)";
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
@@ -791,7 +791,7 @@ function viewGames() {
         <div class="small">${plural(n, "partie", "parties")}${S.ui.gameSort === "forgotten" && n ? ` · ${ago(last.get(g.id))}` : ""}${exps ? ` · ${plural(exps, "extension", "extensions")}` : ""}${g.status === "lent" ? ` · <span class="tag">Prêté${g.lent_to ? " à " + esc(g.lent_to) : ""}</span>` : g.status === "elsewhere" ? ` · <span class="tag">Joué ailleurs</span>` : ""}</div>
         </div></a>`;
   };
-  const actions = isAdmin() ? `<a class="icon-btn" href="#/games/import" aria-label="Importer ma collection BGG">${icon("download")}</a>` : "";
+  const actions = isAdmin() ? `<a class="icon-btn" href="#/games/import" aria-label="Synchroniser avec BGG">${icon("sync")}</a>` : "";
   return header("Jeux", { sub: plural(total, "jeu", "jeux"), actions }) + `
     <div class="search">${icon("search", 18)}<input type="search" placeholder="Rechercher un jeu" value="${esc(S.ui.gameQuery)}" data-input="gameQuery" aria-label="Rechercher un jeu"></div>
     <div class="chips">${[["all", "Tous"], ...Object.entries(STATUS)].map(([k, v]) =>
@@ -805,6 +805,7 @@ function viewGames() {
     ${n && games.length ? `<p class="muted small pad">${plural(games.length, "jeu jouable", "jeux jouables")} à ${n === 6 ? "6 ou plus" : n}</p>` : ""}
     ${games.length ? `<div class="list">${games.map(card).join("")}</div>` : unknown.length ? "" : `<div class="empty"><p class="muted">${total ? (n ? `Aucun jeu de la ludothèque ne se joue à ${n === 6 ? "6 ou plus" : n}.` : "Aucun jeu ne correspond.") : "La ludothèque est vide."}</p>
       ${!total && isAdmin() ? `<div class="row-gap"><a class="btn" href="#/games/import">Importer ma collection BGG</a><a class="btn primary" href="#/games/new">Ajouter un jeu</a></div>` : ""}</div>`}
+    ${isAdmin() && total ? `<p class="center"><a class="btn small" href="#/games/import">${icon("sync", 16)} Synchroniser avec BGG</a></p>` : ""}
     ${unknown.length ? `<section class="group"><h2 class="group-h">Nombre de joueurs non renseigné <span class="muted">· ${unknown.length}</span></h2>
       <div class="list">${unknown.map(card).join("")}</div></section>` : ""}
     ${fab("#/games/new", "Ajouter un jeu")}`;
@@ -911,7 +912,7 @@ function draftFromBgg(t) {
     mechanics: t.mechanics || [], designers: t.designers || [], publisher: t.publisher, min_players: t.min_players,
     max_players: t.max_players, min_time: t.min_time, max_time: t.max_time, weight: t.weight, status: "owned", lent_to: null,
     default_mode: t.cooperative ? "coop" : t.solo_only ? "solo" : "competitive", score_rule: t.cooperative ? "none" : "high",
-    notes: null, base_game_id: t.expansion ? baseMatch?.id || "" : null, _isExpansion: !!t.expansion, _names: t.names || [], _baseBggIds: t.base_bgg_ids || [],
+    notes: null, bgg_synced_at: new Date().toISOString(), base_game_id: t.expansion ? baseMatch?.id || "" : null, _isExpansion: !!t.expansion, _names: t.names || [], _baseBggIds: t.base_bgg_ids || [],
   };
 }
 
@@ -959,37 +960,85 @@ function viewGameForm(id) {
 }
 
 // ---------- Import de la collection BGG -------------------------------------
+// ---------- Synchronisation avec la collection BGG ------------------------
+// Compare la collection BGG (jeux « possédés ») à la ludothèque :
+//  - nouveaux jeux à ajouter ;
+//  - fiches à compléter (données manquantes) — y compris les jeux saisis à la main dont le nom
+//    correspond à un jeu de la collection : ils sont alors associés à BGG ;
+//  - jeux possédés dans C-Party mais absents de la collection : proposés en « joué ailleurs » (jamais supprimés).
+// Ne modifie jamais le nom affiché, la pochette choisie, le statut (sauf choix explicite) ni les parties.
+const normName = (n) => String(n || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+const SYNC_FIELDS = ["bgg_name", "year", "image_url", "thumbnail_url", "types", "categories", "mechanics", "designers", "publisher",
+  "min_players", "max_players", "min_time", "max_time", "weight"];
+const isEmpty = (v) => v == null || v === "" || (Array.isArray(v) && !v.length);
+// Fiche incomplète : pas d'image, de nombre de joueurs ou de durée. Une fiche déjà complétée une fois
+// (bgg_synced_at) n'est plus reproposée : BGG n'a alors rien de plus à donner.
+const missingInfo = (g) => !g.bgg_synced_at && ((isEmpty(g.image_url) && isEmpty(g.thumbnail_url)) || isEmpty(g.min_players) || isEmpty(g.min_time));
+function syncPlan(items) {
+  const byBgg = new Map(S.data.games.filter((g) => g.bgg_id).map((g) => [g.bgg_id, g]));
+  const ids = new Set(items.map((i) => i.id));
+  const manual = S.data.games.filter((g) => !g.bgg_id);
+  const fresh = [], complete = [];
+  for (const i of items) {
+    const g = byBgg.get(i.id);
+    if (g) { if (missingInfo(g)) complete.push({ game: g, item: i, link: false }); continue; }
+    const m = manual.find((x) => normName(x.name) === normName(i.name) || normName(x.bgg_name) === normName(i.name));
+    if (m) { complete.push({ game: m, item: i, link: true }); continue; }
+    // Même nom qu'un jeu déjà présent (autre édition BGG ?) : proposé mais décoché par défaut.
+    const twin = S.data.games.find((x) => normName(x.name) === normName(i.name) || normName(x.bgg_name) === normName(i.name));
+    if (twin && i.checked === undefined) i.checked = false;
+    fresh.push({ ...i, twin });
+  }
+  const gone = S.data.games.filter((g) => g.bgg_id && !ids.has(g.bgg_id) && g.status === "owned");
+  return { fresh, complete, gone };
+}
+
 function viewImport() {
   if (!isAdmin()) return notFound();
-  const im = S.importer || (S.importer = { step: "user", user: localStorage.getItem("nsj-bgg-user") || "", items: [], details: [], progress: "" });
+  const im = S.importer || (S.importer = { step: "user", user: localStorage.getItem("nsj-bgg-user") || "", items: [], details: [], updates: [], progress: "", sel: { complete: {}, gone: {} } });
   let body = "";
   if (im.step === "user" || im.step === "loading") {
     body = `<form class="form" data-form="import-user">
-      <p class="muted">L'import récupère les jeux marqués « possédés » dans ta collection BoardGameGeek, puis leur fiche détaillée. Tu pourras vérifier la liste avant d'enregistrer.</p>
+      <p class="muted">La synchronisation compare les jeux marqués « possédés » dans ta collection BoardGameGeek à la ludothèque de C-Party. Tu vérifies tout avant d'enregistrer : rien n'est supprimé, et les noms affichés, pochettes et parties ne sont jamais modifiés.</p>
       <label class="field"><span>Ton pseudo BGG</span><input name="user" value="${esc(im.user)}" required autocapitalize="off" autocomplete="off" data-autofocus></label>
       <p class="hint">${esc(im.progress)}</p>
       <div class="form-actions"><button class="btn primary" type="submit" ${im.step === "loading" ? "disabled" : ""}>${im.step === "loading" ? "Récupération…" : "Récupérer ma collection"}</button></div>
     </form>`;
   } else if (im.step === "pick") {
-    const owned = new Set(S.data.games.map((g) => g.bgg_id));
-    const fresh = im.items.filter((i) => !owned.has(i.id));
-    body = `<p class="pad">${plural(im.items.length, "jeu trouvé", "jeux trouvés")}, dont <strong>${fresh.length}</strong> pas encore dans la ludothèque.</p>
-      ${fresh.length ? `<div class="pad row-gap"><button class="btn small ghost" data-action="imp-all" data-v="1">Tout cocher</button><button class="btn small ghost" data-action="imp-all" data-v="0">Tout décocher</button></div>
-      <div class="list checks">${fresh.map((i) => `<label class="card check-row"><input type="checkbox" data-imp="${i.id}" ${i.checked !== false ? "checked" : ""}>
-        <span>${esc(i.name)}</span>${i.expansion ? `<span class="tag">Extension</span>` : ""}</label>`).join("")}</div>
-      <div class="form-actions sticky"><button class="btn ghost" data-action="imp-restart">Changer de pseudo</button><button class="btn primary" data-action="imp-details">Récupérer les fiches</button></div>`
-      : `<div class="center"><a class="btn" href="#/games">Retour aux jeux</a></div>`}`;
+    const { fresh, complete, gone } = syncPlan(im.items);
+    const nothing = !fresh.length && !complete.length && !gone.length;
+    body = `<p class="pad">${plural(im.items.length, "jeu possédé", "jeux possédés")} dans la collection BGG de <strong>${esc(im.user)}</strong>.</p>
+      ${nothing ? `<div class="empty"><p>${icon("check", 20)} <strong>La ludothèque est à jour.</strong></p><p class="muted">Rien à ajouter ni à compléter.</p>
+        <a class="btn" href="#/games">Retour aux jeux</a></div>` : ""}
+      ${fresh.length ? `<section class="group"><div class="group-h sync-h"><span>Nouveaux jeux <span class="muted">· ${fresh.length}</span></span>
+        <span class="row-gap"><button class="btn small ghost" data-action="imp-all" data-v="1">Tout</button><button class="btn small ghost" data-action="imp-all" data-v="0">Aucun</button></span></div>
+        <div class="list checks">${fresh.map((i) => `<label class="card check-row"><input type="checkbox" data-imp="${i.id}" ${i.checked !== false ? "checked" : ""}>
+        <span>${esc(i.name)}${i.twin ? `<span class="muted small"> · même nom que « ${esc(i.twin.name)} », déjà dans la ludothèque</span>` : ""}</span>${i.expansion ? `<span class="tag">Extension</span>` : ""}</label>`).join("")}</div></section>` : ""}
+      ${complete.length ? `<section class="group"><h2 class="group-h">Fiches à compléter <span class="muted">· ${complete.length}</span></h2>
+        <p class="pad small muted">Les informations manquantes (pochette BGG, joueurs, durée, difficulté, mécaniques…) sont reprises de BGG. Le nom affiché ne change pas.</p>
+        <div class="list checks">${complete.map((c) => `<label class="card check-row"><input type="checkbox" data-sync-complete="${c.game.id}" ${im.sel.complete[c.game.id] !== false ? "checked" : ""}>
+        <span>${esc(c.game.name)}${c.link ? `<span class="muted small"> · associer à « ${esc(c.item.name)} » sur BGG</span>` : ""}</span></label>`).join("")}</div></section>` : ""}
+      ${gone.length ? `<section class="group"><h2 class="group-h">Plus dans ta collection BGG <span class="muted">· ${gone.length}</span></h2>
+        <p class="pad small muted">Ces jeux ne sont plus marqués « possédés » sur BGG. Rien n'est supprimé : coche ceux à marquer « joué ailleurs » (leurs parties restent).</p>
+        <div class="list checks">${gone.map((g) => `<label class="card check-row"><input type="checkbox" data-sync-gone="${g.id}" ${im.sel.gone[g.id] ? "checked" : ""}>
+        <span>${esc(g.name)}</span></label>`).join("")}</div></section>` : ""}
+      ${nothing ? "" : `<div class="form-actions sticky"><button class="btn ghost" data-action="imp-restart">Changer de pseudo</button><button class="btn primary" data-action="imp-details">Continuer</button></div>`}`;
   } else if (im.step === "details") {
     body = `<div class="empty"><p>Récupération des fiches BGG…</p><p class="muted">${esc(im.progress)}</p></div>`;
   } else if (im.step === "review") {
-    body = `<p class="pad">Vérifie le nom affiché de chaque jeu. BGG ne précise pas la langue des noms : le nom français est deviné.</p>
+    const nGone = Object.values(im.sel.gone).filter(Boolean).length;
+    const nNew = im.details.filter((d) => !d._isExpansion || d._baseName).length;
+    body = `${im.updates.length || nGone ? `<section class="panel"><h2>Modifications</h2><ul class="plain small">
+        ${im.updates.length ? `<li>${icon("check", 14)} ${plural(im.updates.length, "fiche complétée", "fiches complétées")} : ${im.updates.map((u) => esc(u.game.name)).join(", ")}</li>` : ""}
+        ${nGone ? `<li>${icon("check", 14)} ${plural(nGone, "jeu marqué", "jeux marqués")} « joué ailleurs »</li>` : ""}</ul></section>` : ""}
+      ${im.details.length ? `<p class="pad">Nouveaux jeux : vérifie le nom affiché de chacun. BGG ne précise pas la langue des noms : le nom français est deviné.</p>` : ""}
       <div class="list">${im.details.map((d, i) => `<div class="card review">${gameThumb(d, 44)}
         <div class="rv-body"><input value="${esc(d.name)}" data-imp-name="${i}" aria-label="Nom affiché" list="alt-${i}">
         <datalist id="alt-${i}">${(d._names || []).map((n) => `<option value="${esc(n)}">`).join("")}</datalist>
         <div class="muted small">${esc(d.bgg_name)}${d.year ? ` · ${d.year}` : ""}${d._isExpansion ? ` · <span class="tag">Extension${d._baseName ? " de " + esc(d._baseName) : " (jeu de base absent : ignorée)"}</span>` : ""}</div></div></div>`).join("")}</div>
-      <div class="form-actions sticky"><button class="btn ghost" data-action="imp-restart">Recommencer</button><button class="btn primary" data-action="imp-save">Importer ${plural(im.details.filter((d) => !d._isExpansion || d._baseName).length, "jeu", "jeux")}</button></div>`;
+      <div class="form-actions sticky"><button class="btn ghost" data-action="imp-restart">Recommencer</button><button class="btn primary" data-action="imp-save">${nNew ? `Ajouter ${plural(nNew, "jeu", "jeux")}${im.updates.length || nGone ? " et enregistrer" : ""}` : "Enregistrer"}</button></div>`;
   }
-  return header("Importer ma collection", { back: "#/games" }) + body;
+  return header("Synchroniser avec BGG", { back: "#/games" }) + body;
 }
 
 async function importFetchCollection(user) {
@@ -1003,7 +1052,7 @@ async function importFetchCollection(user) {
     for (let attempt = 1; attempt <= 8; attempt++) {
       const res = await S.store.bgg.collection(im.user);
       if (!res.pending) {
-        im.items = res.items.map((i) => ({ ...i, checked: true }));
+        im.items = res.items.map((i) => ({ ...i })); // coché par défaut, sauf doublon probable (voir syncPlan)
         im.step = "pick";
         im.progress = "";
         return render();
@@ -1020,17 +1069,33 @@ async function importFetchCollection(user) {
 
 async function importFetchDetails() {
   const im = S.importer;
-  const ids = im.items.filter((i) => i.checked !== false && !S.data.games.some((g) => g.bgg_id === i.id)).map((i) => i.id);
-  if (!ids.length) return toast("Aucun jeu coché.");
-  im.step = "details"; im.details = []; render();
+  const plan = syncPlan(im.items);
+  const newIds = plan.fresh.filter((i) => i.checked !== false).map((i) => i.id);
+  const upd = plan.complete.filter((c) => im.sel.complete[c.game.id] !== false);
+  const gone = plan.gone.filter((g) => im.sel.gone[g.id]);
+  const ids = [...new Set([...newIds, ...upd.map((c) => c.item.id)])];
+  if (!ids.length && !gone.length) return toast("Rien de coché.");
+  im.step = "details"; im.details = []; im.updates = []; render();
   try {
+    const drafts = new Map();
     for (let i = 0; i < ids.length; i += 20) {
       im.progress = `${Math.min(i + 20, ids.length)} / ${ids.length}`;
       const box = $(".empty .muted"); if (box) box.textContent = im.progress;
       const things = await S.store.bgg.things(ids.slice(i, i + 20));
-      im.details.push(...things.map(draftFromBgg));
+      things.forEach((t) => drafts.set(t.bgg_id, draftFromBgg(t)));
       if (i + 20 < ids.length) await new Promise((ok) => setTimeout(ok, 1200)); // ménage l'API BGG
     }
+    im.details = newIds.map((id) => drafts.get(id)).filter(Boolean);
+    // Fiches à compléter : seuls les champs vides sont remplis (et l'identifiant BGG pour une association).
+    im.updates = upd.map((c) => {
+      const d = drafts.get(c.item.id);
+      if (!d) return null;
+      const patch = {};
+      SYNC_FIELDS.forEach((f) => { if (isEmpty(c.game[f]) && !isEmpty(d[f])) patch[f] = d[f]; });
+      if (c.link) patch.bgg_id = d.bgg_id;
+      patch.bgg_synced_at = new Date().toISOString(); // ne plus la reproposer ensuite
+      return { game: c.game, patch };
+    }).filter(Boolean);
     // Rattache les extensions : jeu de base déjà présent ou importé en même temps.
     const importedBases = new Map(im.details.filter((d) => !d._isExpansion).map((d) => [d.bgg_id, d]));
     for (const d of im.details.filter((x) => x._isExpansion)) {
@@ -1404,7 +1469,14 @@ const actions = {
         return baseId ? { ...clean(d), base_game_id: baseId } : null;
       }).filter(Boolean);
       if (exps.length) await S.store.saveGames(exps);
-      toast(`${plural(saved.length + exps.length, "jeu importé", "jeux importés")}`);
+      for (const u of im.updates) await S.store.saveGame({ ...u.game, ...u.patch });
+      const gone = Object.entries(im.sel.gone).filter(([, v]) => v).map(([id]) => game(id)).filter(Boolean);
+      for (const g of gone) await S.store.saveGame({ ...g, status: "elsewhere" });
+      const parts = [];
+      if (saved.length + exps.length) parts.push(plural(saved.length + exps.length, "jeu ajouté", "jeux ajoutés"));
+      if (im.updates.length) parts.push(plural(im.updates.length, "fiche complétée", "fiches complétées"));
+      if (gone.length) parts.push(plural(gone.length, "jeu marqué « joué ailleurs »", "jeux marqués « joué ailleurs »"));
+      toast(parts.length ? `Synchronisé : ${parts.join(", ")}` : "Rien à enregistrer");
       S.importer = null;
       await reload();
       go("#/games");
@@ -1479,6 +1551,8 @@ document.addEventListener("input", (e) => {
 document.addEventListener("change", async (e) => {
   const t = e.target;
   if (t.dataset.imp) { const it = S.importer.items.find((i) => String(i.id) === t.dataset.imp); if (it) it.checked = t.checked; return; }
+  if (t.dataset.syncComplete) { S.importer.sel.complete[t.dataset.syncComplete] = t.checked; return; }
+  if (t.dataset.syncGone) { S.importer.sel.gone[t.dataset.syncGone] = t.checked; return; }
   if ("statKind" in t.dataset) { S.ui.statKind = t.value; const y = window.scrollY; render(); window.scrollTo(0, y); return; }
   if (t.dataset.actionChange === "status") { $("#lent-field").hidden = t.value !== "lent"; return; }
   if ("cover" in t.dataset && t.files?.[0] && S.gameDraft) {

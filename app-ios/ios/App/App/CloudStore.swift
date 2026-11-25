@@ -166,6 +166,7 @@ public class CloudStorePlugin: CAPPlugin, CAPBridgedPlugin, UICloudSharingContro
         CAPPluginMethod(name: "fetchAll", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "modify", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "image", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "shareFile", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "participants", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "manageSharing", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "invite", returnType: CAPPluginReturnPromise),
@@ -233,6 +234,26 @@ public class CloudStorePlugin: CAPPlugin, CAPBridgedPlugin, UICloudSharingContro
         run(call) {
             let a = try await self.space.requireActive()
             return ["data": try await self.space.image(a, name: name).base64EncodedString()]
+        }
+    }
+
+    /// Partage d'un fichier (export CSV, carte résultat) : feuille de partage d'iOS
+    /// (Enregistrer dans Fichiers, Messages, Mail…). data = contenu en base64.
+    @objc func shareFile(_ call: CAPPluginCall) {
+        let name = (call.getString("name") ?? "c-party").replacingOccurrences(of: "/", with: "-")
+        guard let data = call.getString("data").flatMap({ Data(base64Encoded: $0) }) else {
+            call.reject("Fichier vide"); return
+        }
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("partage", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent(name)
+        do { try data.write(to: url, options: .atomic) } catch { call.reject("Impossible de préparer le fichier"); return }
+        DispatchQueue.main.async {
+            guard let vc = self.bridge?.viewController else { call.reject("Écran indisponible"); return }
+            let sheet = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+            sheet.popoverPresentationController?.sourceView = vc.view
+            sheet.completionWithItemsHandler = { _, done, _, _ in call.resolve(["shared": done]) }
+            vc.present(sheet, animated: true)
         }
     }
 

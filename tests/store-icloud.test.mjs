@@ -101,4 +101,21 @@ ok((await s2.photos(pid)).length === 1 && !cloud.has(`ph-${phs[0].id}`), "photo 
 owner = false; permission = "readOnly"; await s2.refreshStatus();
 err = null; try { await s2.addPhotos(pid, [{ full: "data:image/jpeg;base64,QQ==", thumb: "x" }]); } catch (e) { err = e.message; }
 ok(err === "Action réservée aux gestionnaires", "joueur : ajout de photo refusé");
+
+// Sauvegarde complète (Plus → Exporter) : réimportable dans un groupe vide, sans perte
+const { backupCsv, playsCsv } = await import("../js/export.js");
+owner = true; permission = "readWrite"; await s2.refreshStatus();
+const before = await s2.loadAll();
+const hist = (await Promise.all(before.plays.map((p) => s2.history(p.id)))).flat();
+const delAll = await s2.deletedPlays();
+const csv = backupCsv(before, [...hist, ...delAll.filter((x) => !hist.some((h) => h.id === x.id))]);
+ok(playsCsv(before).split("\r\n")[0].startsWith("\uFEFFDate;Jeu;"), "export tableur : en-tête avec « ; »");
+cloud.clear();
+const s3 = await createICloudStore(); await s3.init();
+await s3.importExport(tablesFromExport(csv));
+const after = await s3.loadAll();
+const norm = (x) => JSON.stringify([...x].map(({ photo_count, ...p }) => p).sort((a, b) => a.id.localeCompare(b.id)));
+ok(norm(after.plays) === norm(before.plays) && after.games.length === before.games.length && after.players.length === before.players.length,
+  "sauvegarde réimportée à l'identique (" + after.plays.length + " parties)");
+ok((await s3.history(before.plays[0].id)).length === (await s2.history(before.plays[0].id)).length, "historique réimporté");
 console.log("\nTous les tests passent.");

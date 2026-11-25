@@ -26,6 +26,7 @@ Cédric a choisi de quitter Supabase pour **iCloud (CloudKit)**, sauf le relais 
   en data URL, champ `image` (CKAsset, JPEG ≤ 1600 px) téléchargé seulement à l'ouverture (`CloudStore.image`).
   `fetchAll` ne lit que `json`. Gestionnaires seulement pour ajouter/supprimer ; gardées si la partie est supprimée
   (restauration), effacées avec un jeu supprimé. Site Supabase : pas de photos.
+- **Pochette d'un jeu** : champ `cover` du jeu (data URL carrée 400 px, ≈ 30 Ko) dans le `json`, prioritaire sur l'image BGG.
 - **App iPhone uniquement** pour les vraies données ; le site GitHub Pages ne garde que le mode démo.
 - **Relais BGG** : reste une fonction Supabase, protégée par une clé propre à l'app (plus de comptes Supabase).
 - **Fait le 24/11/2026** : données importées dans iCloud (production) depuis `export/c-party-2026-11-24.csv`
@@ -47,6 +48,7 @@ Cédric a choisi de quitter Supabase pour **iCloud (CloudKit)**, sauf le relais 
 | `js/secrets.js` | **Exclu de Git.** `BGG_APP_KEY`, identique au secret Supabase `APP_KEY` du relais BGG |
 | `tests/store-icloud.test.mjs` | Test du stockage iCloud avec un faux iCloud : `node tests/store-icloud.test.mjs` |
 | `supabase/export.sql`, `supabase/verifier-export.mjs` | Export complet en un CSV (`table`, `id`, `donnees` JSON) et son contrôle ; l'import se fait dans l'app (Plus) |
+| `js/export.js`, `js/card.js` | Exports CSV (sauvegarde réimportable + parties pour tableur), partage de fichier (`CloudStore.shareFile` dans l'app), carte résultat PNG |
 | `js/util.js`, `js/icons.js` | Formatage FR, libellés, icônes SVG |
 | `js/config.js` | URL Supabase + clé publishable (publique, normal qu'elle soit dans le dépôt) |
 | `supabase/schema.sql` | Schéma complet, **rejouable sans perte** (`if not exists`, `drop policy if exists`) |
@@ -71,7 +73,7 @@ Cédric a choisi de quitter Supabase pour **iCloud (CloudKit)**, sauf le relais 
 ## Feuille de route
 - **Lot 1 (fait, v1.0.1)** : comptes/invitations, ludothèque + import collection BGG, parties + historique,
   tableaux de bord de base.
-- **Lot 2** : Elo par jeu (départ 1000, K=32 réparti en duels), indice de performance (victoires / victoires
+- **Lot 2 (en cours, v1.1.0)** — fait : Elo par jeu (fiche jeu, fiche joueur, écart sur chaque partie), indice de performance, face-à-face, némésis / victime favorite, filtres nombre de joueurs + type/mécanique sur l'accueil, chacun expliqué dans l'app (`explain()`). Reste : records et séries (non demandés pour l'instant). Spécification d'origine : Elo par jeu (départ 1000, K=32 réparti en duels), indice de performance (victoires / victoires
   attendues 1/n), némésis (≥ 3 parties communes) et duels, records et séries, jeux délaissés (> 6 mois),
   filtres période / type-mécanique / nombre de joueurs.
 - **Lot 3** : saisie hors-ligne (file d'attente locale, envoi à l'ouverture), notifications push

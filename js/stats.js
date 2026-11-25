@@ -26,9 +26,15 @@ export function periodRange(period) {
 }
 export const PERIODS = { all: "Tout", year: "Cette année", "12m": "12 derniers mois", lastyear: "L'an dernier" };
 
-export function filterPlays(plays, { period = "all" } = {}) {
+// Filtres des statistiques : période, nombre de joueurs (5 = « 5 et plus »),
+// type ou mécanique du jeu (« t:Famille » / « m:Tile Placement », données BGG).
+export function filterPlays(plays, { period = "all", nbPlayers = 0, kind = "", games = [] } = {}) {
   const [from, to] = periodRange(period);
-  return plays.filter((p) => (!from || p.played_at >= from) && (!to || p.played_at <= to));
+  const byId = new Map(games.map((g) => [g.id, g]));
+  const [k, v] = kind ? [kind.slice(0, 1), kind.slice(2)] : [];
+  return plays.filter((p) => (!from || p.played_at >= from) && (!to || p.played_at <= to)
+    && (!nbPlayers || (nbPlayers >= 5 ? p.players.length >= 5 : p.players.length === nbPlayers))
+    && (!kind || ((k === "t" ? byId.get(p.game_id)?.types : byId.get(p.game_id)?.mechanics) || []).includes(v)));
 }
 
 // Classement déduit des scores (égalité = même rang).
@@ -79,7 +85,7 @@ function playerLine(playerId, plays) {
   }
   return {
     plays: n, comp, wins, rate: comp ? wins / comp : null,
-    perf: expected ? wins / expected : null,
+    perf: expected ? wins / expected : null, expected,
     coop, coopWins, coopRate: coop ? coopWins / coop : null,
   };
 }
@@ -163,4 +169,79 @@ export function playerStats(state, player, allPlays) {
     return { game: g, ...l, best };
   }).filter((x) => x.game).sort((a, b) => b.plays - a.plays || b.wins - a.wins);
   return { ...line, count: line.plays, plays, minutes, games, byMonth: monthly(plays), last: plays[0]?.played_at ?? null };
+}
+
+
+// ---------- Face-à-face, némésis, Elo ----------------------------------------
+// Place d'un joueur dans une partie compétitive (plus petit = meilleur) : le rang saisi,
+// sinon gagnant = 1 et les autres = 2. En équipes, deux coéquipiers ne s'affrontent pas.
+const placeOf = (x) => x.rank ?? (x.is_winner ? 1 : 2);
+const opposed = (p, a, b) => p.mode !== "teams" || (a.team || a.player_id) !== (b.team || b.player_id);
+const chrono = (plays) => [...plays].sort((a, b) => a.played_at.localeCompare(b.played_at) || String(a.created_at).localeCompare(String(b.created_at)));
+
+// Bilan de chaque adversaire d'un joueur : parties compétitives communes (hors apprentissage).
+export function headToHead(plays, playerId) {
+  const out = new Map();
+  for (const p of plays) {
+    if (!isComp(p)) continue;
+    const me = p.players.find((x) => x.player_id === playerId);
+    if (!me) continue;
+    for (const o of p.players) {
+      if (o.player_id === playerId || !opposed(p, me, o)) continue;
+      const r = out.get(o.player_id) || { player_id: o.player_id, plays: 0, ahead: 0, behind: 0, ties: 0 };
+      r.plays++;
+      const d = placeOf(me) - placeOf(o);
+      if (d < 0) r.ahead++; else if (d > 0) r.behind++; else r.ties++;
+      out.set(o.player_id, r);
+    }
+  }
+  return [...out.values()].sort((a, b) => b.plays - a.plays || b.ahead - a.ahead);
+}
+
+// Némésis : l'adversaire (au moins MIN_SAMPLE parties communes) qui finit le plus souvent devant,
+// à condition qu'il soit devant dans plus de la moitié des parties communes.
+export function nemesis(plays, playerId) {
+  return headToHead(plays, playerId).filter((r) => r.plays >= MIN_SAMPLE && r.behind / r.plays > 0.5)
+    .sort((a, b) => b.behind / b.plays - a.behind / a.plays || b.plays - a.plays)[0] || null;
+}
+// Victime favorite : l'inverse (on finit devant elle le plus souvent).
+export function favouriteVictim(plays, playerId) {
+  return headToHead(plays, playerId).filter((r) => r.plays >= MIN_SAMPLE && r.ahead / r.plays > 0.5)
+    .sort((a, b) => b.ahead / b.plays - a.ahead / a.plays || b.plays - a.plays)[0] || null;
+}
+
+// Elo d'un jeu : départ 1000, K = 32 réparti en duels (chaque paire d'adversaires compte pour
+// K / (nombre d'adversaires)). En équipes, une équipe joue avec la moyenne de ses joueurs.
+export const ELO_START = 1000, ELO_K = 32;
+export function eloForGame(plays, gameId) {
+  const elo = new Map(), count = new Map(), deltas = new Map(); // deltas : play_id -> { player_id: delta }
+  const get = (id) => elo.get(id) ?? ELO_START;
+  for (const p of chrono(plays.filter((x) => x.game_id === gameId && isComp(x) && x.players.length > 1))) {
+    // côtés : un joueur, ou une équipe
+    const sides = new Map();
+    for (const x of p.players) {
+      const k = p.mode === "teams" ? (x.team || x.player_id) : x.player_id;
+      if (!sides.has(k)) sides.set(k, { members: [], place: placeOf(x) });
+      sides.get(k).members.push(x.player_id);
+    }
+    const list = [...sides.values()].map((sd) => ({ ...sd, rating: sd.members.reduce((t, id) => t + get(id), 0) / sd.members.length }));
+    if (list.length < 2) continue;
+    const k = ELO_K / (list.length - 1);
+    const d = {};
+    for (const a of list) {
+      let delta = 0;
+      for (const b of list) {
+        if (a === b) continue;
+        const expected = 1 / (1 + 10 ** ((b.rating - a.rating) / 400));
+        const score = a.place < b.place ? 1 : a.place > b.place ? 0 : 0.5;
+        delta += k * (score - expected);
+      }
+      a.members.forEach((id) => { d[id] = delta; });
+    }
+    for (const [id, v] of Object.entries(d)) { elo.set(id, get(id) + v); count.set(id, (count.get(id) || 0) + 1); }
+    deltas.set(p.id, d);
+  }
+  const ranking = [...elo.entries()].map(([player_id, rating]) => ({ player_id, rating, plays: count.get(player_id) }))
+    .sort((a, b) => b.rating - a.rating);
+  return { ranking, deltas };
 }

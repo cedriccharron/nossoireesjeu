@@ -1,10 +1,10 @@
 // Service worker : garde l'application disponible hors connexion.
 // Change VERSION à chaque mise en ligne pour forcer la mise à jour.
-const VERSION = "nsj-1.0.8";
+const VERSION = "nsj-1.1.0";
 const SHELL = [
   "./", "./index.html", "./css/app.css", "./manifest.webmanifest",
   "./js/app.js", "./js/config.js", "./js/util.js", "./js/icons.js", "./js/stats.js",
-  "./js/store-demo.js", "./js/store-supabase.js",
+  "./js/store-demo.js", "./js/store-supabase.js", "./js/export.js", "./js/card.js",
   "./icons/icon-192.png", "./icons/apple-touch-icon.png",
 ];
 

@@ -119,3 +119,21 @@ export async function preparePhoto(file, max = 1600) {
     return { full: draw(max, 0.82), thumb: draw(360, 0.7) };
   } finally { URL.revokeObjectURL(url); }
 }
+
+// Pochette d'un jeu : image recadrée au carré (centre), 400 px, JPEG (≈ 30 Ko), en data URL.
+export async function prepareCover(file, size = 400) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((ok, ko) => {
+      const i = new Image();
+      i.onload = () => ok(i);
+      i.onerror = () => ko(new Error("Image illisible"));
+      i.src = url;
+    });
+    const side = Math.min(img.naturalWidth, img.naturalHeight);
+    const c = document.createElement("canvas");
+    c.width = c.height = Math.min(size, side);
+    c.getContext("2d").drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, c.width, c.height);
+    return c.toDataURL("image/jpeg", 0.8);
+  } finally { URL.revokeObjectURL(url); }
+}

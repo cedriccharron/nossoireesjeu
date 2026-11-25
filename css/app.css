@@ -347,3 +347,39 @@ details summary { cursor: pointer; padding: 12px 0; }
   width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; cursor: pointer; }
 .viewer-nav.prev { left: 10px; } .viewer-nav.next { right: 10px; }
 body.no-scroll { overflow: hidden; }
+
+/* Tri du classement */
+.th-sort { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; }
+.th-sort.on { color: var(--accent); }
+
+/* Pochette d'un jeu */
+.cover-edit { display: flex; align-items: center; gap: 14px; }
+.cover-edit .row-gap { display: flex; flex-wrap: wrap; gap: 8px; }
+.game-hero { margin: 0 16px 12px; display: flex; justify-content: center; }
+.game-hero img { width: 160px; height: 160px; object-fit: cover; border-radius: 16px; box-shadow: var(--shadow); background: var(--surface-2); }
+
+/* « Que jouer ce soir ? » */
+.tonight { padding: 2px 16px 10px; display: grid; gap: 8px; }
+.tonight-row { display: grid; grid-template-columns: 92px 1fr; align-items: center; gap: 8px; }
+.tonight .seg button { padding: 6px 2px; font-size: 13.5px; }
+
+/* Lot 2 : Elo, indice, face-à-face, filtres */
+.good { color: var(--good); }
+.bad { color: var(--bad); }
+.explain { margin-top: 10px; }
+.explain summary { cursor: pointer; color: var(--accent); font-size: 14px; list-style: none; display: inline-flex; align-items: center; gap: 6px; }
+.explain summary::-webkit-details-marker { display: none; }
+.explain summary::before { content: "?"; display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%;
+  border: 1.5px solid currentColor; font-size: 12px; font-weight: 700; }
+.explain[open] summary { margin-bottom: 6px; }
+.explain > div { background: var(--surface-2); border-radius: 10px; padding: 4px 12px; color: var(--ink-2); }
+.explain ul { padding-left: 18px; margin: 6px 0; }
+.stat-filters { display: grid; gap: 8px; padding: 0 16px 10px; }
+.stat-filters .seg button { padding: 6px 2px; font-size: 13.5px; }
+.stat-filters select { width: 100%; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font: inherit; font-size: 14.5px; }
+.rivals { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.rivals .explain { grid-column: 1 / -1; margin-top: 0; }
+.rival strong { font-size: 18px; }
+.elo-line { margin: 10px 0 0; line-height: 1.6; }
+.perf { flex-wrap: wrap; }
+.perf > .explain { flex-basis: 100%; margin-top: 0; }

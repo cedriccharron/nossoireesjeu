@@ -76,7 +76,7 @@ export async function createSupabaseStore() {
 
     async saveGame(game) {
       const row = { ...game };
-      delete row.names; delete row.expansion; delete row.base_bgg_ids; delete row.cooperative; delete row.solo_only;
+      delete row.cover; delete row.names; delete row.expansion; delete row.base_bgg_ids; delete row.cooperative; delete row.solo_only;
       if (row.id) return must(await sb.from("games").update(row).eq("id", row.id).select().single());
       delete row.id;
       return must(await sb.from("games").insert(row).select().single());

@@ -11,7 +11,7 @@ import {
   eloForGame, headToHead, nemesis, favouriteVictim, ELO_START,
 } from "./stats.js";
 
-const VERSION = "1.2.0 (nouveau look)";
+const VERSION = "1.2.1";
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
@@ -1053,7 +1053,10 @@ function viewImport() {
     <div class="sec-h"><h2>Ou avec le fichier de ta collection</h2></div><section class="panel">
       <p class="small">Sur le site BoardGameGeek, ouvre ta collection et exporte-la en CSV (lien « Export »), puis choisis le fichier ici. Pas besoin de connexion à BGG depuis l'app.</p>
       <label class="btn block">${icon("download", 18)} Choisir le fichier CSV de BGG<input type="file" accept=".csv,text/csv,text/comma-separated-values" data-bgg-csv hidden></label>
-      <p class="small muted">Le fichier ne contient ni pochettes ni mécaniques : seuls l'année, le nombre de joueurs, la durée et la difficulté sont repris.</p></section>`;
+      <p class="small muted">Le fichier ne contient ni pochettes ni mécaniques : seuls l'année, le nombre de joueurs, la durée et la difficulté sont repris.</p></section>
+    <div class="sec-h"><h2>Importer des pochettes</h2></div><section class="panel">
+      <p class="small">Fichier de pochettes préparé à part (<code>pochettes-c-party.json</code>). Seuls les jeux <strong>sans pochette</strong> sont complétés, reconnus par leur numéro BGG.</p>
+      <label class="btn block">${icon("download", 18)} Choisir le fichier de pochettes<input type="file" accept=".json,application/json" data-covers-file hidden></label></section>`;
   } else if (im.step === "pick") {
     const { fresh, complete, gone } = syncPlan(im.items, im.fileThings);
     const nothing = !fresh.length && !complete.length && !gone.length;
@@ -1626,6 +1629,28 @@ document.addEventListener("change", async (e) => {
       toast(list.length > 1 ? `${list.length} photos ajoutées` : "Photo ajoutée");
       await reload();
     } catch (err) { toast(err.message, "error"); await reload(); }
+    return;
+  }
+  if ("coversFile" in t.dataset && t.files?.[0]) {
+    try {
+      let data;
+      try { data = JSON.parse(await t.files[0].text()); } catch { throw new Error("Fichier illisible."); }
+      if (data?.format !== "c-party-pochettes" || !Array.isArray(data.items)) throw new Error("Ce n'est pas un fichier de pochettes C-Party.");
+      const byBgg = new Map(S.data.games.filter((g) => g.bgg_id).map((g) => [Number(g.bgg_id), g]));
+      const todo = [], kept = [], unknown = [];
+      for (const it of data.items) {
+        if (!/^data:image\/(jpeg|png|webp);base64,/.test(it.cover || "")) continue;
+        const g = byBgg.get(Number(it.bgg_id));
+        if (!g) unknown.push(it.name || it.bgg_id); else if (g.cover) kept.push(g.name); else todo.push({ g, cover: it.cover });
+      }
+      const extra = [kept.length ? `${plural(kept.length, "jeu a", "jeux ont")} déjà une pochette (inchangée).` : "", unknown.length ? `Absents de la ludothèque : ${unknown.join(", ")}.` : ""].filter(Boolean).join(" ");
+      if (!todo.length) { toast(extra || "Aucune pochette à ajouter."); t.value = ""; return; }
+      if (!(await confirmDialog(`Ajouter ${plural(todo.length, "pochette", "pochettes")} : ${todo.map((x) => x.g.name).join(", ")} ?${extra ? " " + extra : ""}`, "Ajouter"))) { t.value = ""; return; }
+      for (const x of todo) await S.store.saveGame({ ...x.g, cover: x.cover });
+      toast(plural(todo.length, "pochette ajoutée", "pochettes ajoutées"));
+      await reload();
+    } catch (err) { toast(err.message, "error"); }
+    t.value = "";
     return;
   }
   if ("bggCsv" in t.dataset && t.files?.[0]) {

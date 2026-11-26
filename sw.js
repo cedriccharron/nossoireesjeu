@@ -1,6 +1,6 @@
 // Service worker : garde l'application disponible hors connexion.
 // Change VERSION à chaque mise en ligne pour forcer la mise à jour.
-const VERSION = "nsj-1.3.0";
+const VERSION = "nsj-1.3.1";
 const SHELL = [
   "./", "./index.html", "./css/app.css", "./manifest.webmanifest",
   "./js/app.js", "./js/config.js", "./js/util.js", "./js/icons.js", "./js/stats.js",

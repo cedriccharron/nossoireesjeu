@@ -11,7 +11,7 @@ import {
   eloForGame, headToHead, nemesis, favouriteVictim, ELO_START, myStats,
 } from "./stats.js";
 
-const VERSION = "1.3.0 (groupes)";
+const VERSION = "1.3.1";
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
@@ -1310,6 +1310,8 @@ function viewPlayers() {
     ${fab("#/players/new", "Ajouter un joueur")}`;
 }
 
+// Fiche joueur (refonte du 26/11/2026) : en-tête à la couleur du joueur, forme récente, jauge de performance,
+// rivalités en tuiles, jeux avec barres et rang Elo, face-à-face en barres.
 function viewPlayer(id) {
   const p = player(id);
   if (!p) return header("Joueur", { back: "#/players" }) + `<div class="empty"><p>Ce joueur n'existe plus.</p></div>`;
@@ -1317,53 +1319,90 @@ function viewPlayer(id) {
   const account = S.data.profiles.find((x) => x.player_id === p.id);
   const h2h = headToHead(S.data.plays, p.id);
   const nem = nemesis(S.data.plays, p.id), vic = favouriteVictim(S.data.plays, p.id);
-  const elos = st.games.map((l) => {
+  const elo = new Map(st.games.map((l) => {
     const e = eloForGame(S.data.plays, l.game.id);
     const i = e.ranking.findIndex((r) => r.player_id === p.id);
-    return i < 0 ? null : { game: l.game, ...e.ranking[i], pos: i + 1, of: e.ranking.length };
-  }).filter(Boolean).sort((a, b) => b.rating - a.rating);
+    return [l.game.id, i < 0 ? null : { ...e.ranking[i], pos: i + 1, of: e.ranking.length }];
+  }));
   const actions = isAdmin() ? `<a class="icon-btn" href="#/players/${p.id}/edit" aria-label="Modifier">${icon("edit")}</a>` : "";
-  return header(p.name, { back: "#/players", actions, sub: `${account ? `Compte : ${esc(account.display_name || account.email)}` : "Sans compte"}${p.archived ? " · Archivé" : ""}` }) + `
-    <section class="kpis">
-      ${kpi("parties", fmtNum(st.plays.length))}
-      ${kpi("de jeu", fmtHours(st.minutes))}
-      ${kpi("victoires", fmtNum(st.wins), st.comp ? `sur ${st.comp} compétitives` : "")}
-      ${kpi("taux de victoire", st.comp ? rate(st.rate, st.comp) : "—")}
-    </section>
-    ${st.perf != null ? `<section class="panel perf"><div><div class="muted small">Indice de performance</div><strong class="big ${st.comp < MIN_SAMPLE ? "thin" : ""}">${fmt2(st.perf)}</strong></div>
-      <p class="small muted">${st.perf >= 1.05 ? `${esc(p.name)} gagne plus souvent que le hasard ne le prévoit.` : st.perf <= 0.95 ? `${esc(p.name)} gagne moins souvent que le hasard ne le prévoit.` : `${esc(p.name)} gagne à peu près autant que le hasard le prévoit.`}</p>
+  const first = st.plays.length ? st.plays[st.plays.length - 1].played_at : null;
+  const pill = (txt) => `<span class="pf-pill">${txt}</span>`;
+  const hero = `<section class="pf-hero">
+    ${dot(p, 76).replace('class="av"', 'class="av pf-av"')}
+    <h1 class="pf-name">${esc(p.name)}</h1>
+    <p class="pf-sub">${first ? `Joue depuis ${esc(monthLabel(first.slice(0, 7)))} · ` : ""}${plural(st.plays.length, "partie", "parties")}${p.archived ? " · archivé" : ""}</p>
+    ${st.plays.length ? `<div class="pf-pills">${st.comp ? pill(`${icon("trophy", 14)} ${plural(st.wins, "victoire", "victoires")}`) + pill(`<span class="${st.comp < MIN_SAMPLE ? "thin" : ""}">${fmtPct(st.rate)}</span>`) : ""}${pill(fmtHours(st.minutes))}</div>` : ""}
+    <p class="pf-acc small">${account ? `Compte : ${esc(account.display_name || account.email)}` : "Sans compte"}</p></section>`;
+  if (!st.plays.length) return header("", { back: "#/players", actions }) + `<div class="pf" style="--pc:${esc(p.color)}">${hero}
+    <div class="empty"><p class="muted">Aucune partie pour l'instant.</p></div></div>`;
+
+  // Forme récente : les 8 dernières parties, de la plus ancienne à la plus récente.
+  const form = st.plays.slice(0, 8).reverse().map((pl) => {
+    const me = pl.players.find((x) => x.player_id === p.id);
+    const g = game(pl.game_id);
+    let cls, txt;
+    if (pl.is_learning) { cls = "learn"; txt = "A"; }
+    else if (pl.mode === "coop" || pl.mode === "solo") { const w = pl.coop_result === "win"; cls = w ? "win" : "loss"; txt = w ? "V" : "✕"; }
+    else if (me?.is_winner) { cls = "win"; txt = "V"; }
+    else { cls = "place"; txt = me?.rank ?? "–"; }
+    return `<a class="pf-dot ${cls}" href="#/plays/${pl.id}" title="${esc(`${g?.name || "Jeu"} · ${fmtShort(pl.played_at)}`)}">${esc(String(txt))}</a>`;
+  }).join("");
+
+  // Indice de performance : jauge de 0 à 3, repère « 1 = hasard ».
+  const perf = st.perf != null ? (() => {
+    const w = Math.min(st.perf, 3) / 3 * 100;
+    const phrase = st.perf >= 1.05 ? `gagne ${fmtNum(st.perf, 1)}× plus que le hasard` : st.perf <= 0.95 ? "gagne moins souvent que le hasard" : "gagne autant que le hasard";
+    return `<div class="sec-h"><h2>Performance</h2></div><section class="panel">
+      <div class="pf-perf"><strong class="${st.comp < MIN_SAMPLE ? "thin" : ""}">${fmt2(st.perf)}</strong><span class="${st.perf >= 1.05 ? "good" : st.perf <= 0.95 ? "bad" : "muted"} small">${phrase}</span></div>
+      <div class="pf-gauge"><i style="width:${w}%"></i><b style="left:33.33%"></b></div>
+      <div class="pf-scale"><span>0</span><span style="left:33.33%">1 = hasard</span><span>3</span></div>
       ${explain(`<p>À 4 joueurs, chacun a « normalement » 1 chance sur 4 de gagner ; à 2 joueurs, 1 sur 2. L'indice divise les victoires réelles par ce nombre de victoires « attendues au hasard ».</p>
         <p>Ici : ${plural(st.wins, "victoire", "victoires")} pour ${fmtNum(st.expected, 1)} attendue${st.expected >= 2 ? "s" : ""}, soit ${fmt2(st.perf)}. <strong>1,0</strong> = dans la moyenne, <strong>1,5</strong> = 50 % de victoires en plus que prévu, <strong>0,7</strong> = 30 % de moins.</p>
-        <p class="muted">Contrairement au taux de victoire, l'indice n'avantage pas ceux qui jouent souvent en duel.</p>`)}</section>` : ""}
-    ${nem || vic ? `<section class="panel rivals">
-      ${nem ? `<div class="rival"><div class="muted small">😈 Némésis</div><a href="#/players/${nem.player_id}"><strong>${pname(nem.player_id)}</strong></a>
-        <div class="small">finit devant ${esc(p.name)} ${nem.behind} fois sur ${nem.plays}</div></div>` : ""}
-      ${vic ? `<div class="rival"><div class="muted small">🎯 Victime favorite</div><a href="#/players/${vic.player_id}"><strong>${pname(vic.player_id)}</strong></a>
-        <div class="small">${esc(p.name)} finit devant ${vic.ahead} fois sur ${vic.plays}</div></div>` : ""}
-      ${explain(`<p>La <strong>némésis</strong> est l'adversaire qui bat le plus souvent ${esc(p.name)} : parmi les joueurs rencontrés au moins ${MIN_SAMPLE} fois en partie compétitive, celui qui finit le plus souvent devant (plus d'une fois sur deux).</p>
-        <p>La <strong>victime favorite</strong>, c'est l'inverse : l'adversaire que ${esc(p.name)} devance le plus souvent.</p>
-        <p class="muted">« Finir devant » = avoir un meilleur rang dans la partie. En équipes, seuls les joueurs de l'équipe adverse comptent. Parties d'apprentissage exclues.</p>`)}</section>` : ""}
+        <p class="muted">Contrairement au taux de victoire, l'indice n'avantage pas ceux qui jouent souvent en duel.</p>`)}</section>`;
+  })() : "";
+
+  const rivalTile = (r, label, good) => r
+    ? `<a class="pf-rival" href="#/players/${r.player_id}">${dot(player(r.player_id), 40)}<strong>${pname(r.player_id)}</strong><span class="muted small">${label}</span>
+       <span class="small ${good ? "good" : "bad"}">${good ? `${r.ahead} – ${r.behind}` : `${r.ahead} – ${r.behind}`}</span></a>`
+    : `<div class="pf-rival none"><span class="av" style="--s:40px;background:var(--surface-2);color:var(--muted)">${icon(good ? "trophy" : "check", 18)}</span><strong>Aucune</strong><span class="muted small">${label}</span>
+       <span class="small muted">${good ? "personne n'est dominé" : "personne ne le domine"}</span></div>`;
+  const rivals = nem || vic ? `<div class="sec-h"><h2>Rivalités</h2></div><div class="pf-rivals">${rivalTile(vic, "victime favorite", true)}${rivalTile(nem, "némésis", false)}</div>
+    <div class="pad">${explain(`<p>La <strong>némésis</strong> est l'adversaire qui bat le plus souvent ${esc(p.name)} : parmi les joueurs rencontrés au moins ${MIN_SAMPLE} fois en partie compétitive, celui qui finit le plus souvent devant (plus d'une fois sur deux).</p>
+      <p>La <strong>victime favorite</strong>, c'est l'inverse : l'adversaire que ${esc(p.name)} devance le plus souvent.</p>
+      <p class="muted">Le score indiqué est « devant – derrière ». En équipes, seuls les joueurs de l'équipe adverse comptent. Parties d'apprentissage exclues.</p>`)}</div>` : "";
+
+  const gamesList = `<div class="sec-h"><h2>Ses jeux</h2></div><div class="list">${st.games.map((l) => {
+    const e = elo.get(l.game.id);
+    const n = l.comp || l.coop, w = l.comp ? l.wins : l.coopWins;
+    const badge = l.comp && e ? `<span class="pf-badge ${e.pos === 1 && e.plays >= MIN_SAMPLE ? "gold" : ""} ${e.plays < MIN_SAMPLE ? "thin" : ""}" title="Elo ${fmtNum(Math.round(e.rating))}, ${e.pos}e sur ${e.of}">${e.pos === 1 ? "1er" : `${e.pos}e`} Elo</span>`
+      : !l.comp && l.coop ? `<span class="pf-badge">coop</span>` : "";
+    return `<a class="card game" href="#/games/${l.game.id}">${gameThumb(l.game, 40)}
+      <span class="g-body"><strong>${esc(l.game.name)}</strong>
+        <span class="pf-bar-row">${n ? `<span class="pf-bar"><i style="width:${(w / n) * 100}%"></i></span><span class="muted small">${w}/${n}</span>` : `<span class="muted small">apprentissage</span>`}</span>
+        <span class="muted small">${plural(l.plays, "partie", "parties")}${l.best != null ? ` · meilleur ${fmtScore(l.best)}` : ""}</span></span>${badge}</a>`;
+  }).join("")}</div>
+    <div class="pad">${explain(ELO_EXPLAIN, "L'Elo, c'est quoi ?")}</div>`;
+
+  const duels = h2h.length ? `<div class="sec-h"><h2>Face-à-face</h2></div><section class="panel">${h2h.map((r) => {
+    const tot = Math.max(1, r.ahead + r.behind + r.ties);
+    return `<a class="pf-duel" href="#/players/${r.player_id}">${dot(player(r.player_id), 28)}<span class="pf-duel-n">${pname(r.player_id)}</span>
+      <span class="pf-split"><i class="a" style="width:${(r.ahead / tot) * 100}%"></i><i class="t" style="width:${(r.ties / tot) * 100}%"></i><i class="b" style="width:${(r.behind / tot) * 100}%"></i></span>
+      <span class="pf-duel-s">${r.ahead}–${r.behind}</span></a>`;
+  }).join("")}
+    ${explain(`<p>Pour chaque adversaire, le bilan de vos parties compétitives communes : en <span class="good">vert</span>, les fois où ${esc(p.name)} a fini <strong>devant</strong> (meilleur rang) ; en <span class="bad">rouge</span>, <strong>derrière</strong> ; en gris, les égalités.</p>
+      <p>Exemple : dans une partie à 4 où ${esc(p.name)} finit 2e, il est « devant » les 3e et 4e, et « derrière » le 1er.</p>
+      <p class="muted">En équipes, les coéquipiers ne s'affrontent pas. Parties d'apprentissage exclues.</p>`)}</section>` : "";
+
+  return header("", { back: "#/players", actions }) + `<div class="pf" style="--pc:${esc(p.color)}">${hero}
+    <div class="sec-h"><h2>Forme récente</h2><span class="muted small">${st.plays.length > 8 ? "8 dernières" : ""}</span></div>
+    <section class="panel pf-form">${form}</section>
+    ${perf}
+    ${rivals}
     ${st.coop ? `<p class="coopline pad">Coopératif et solo : <strong>${plural(st.coopWins, "réussite", "réussites")}</strong> sur ${st.coop} (${fmtPct(st.coopRate)})</p>` : ""}
-    ${st.plays.length ? `<div class="sec-h"><h2>Parties sur 12 mois</h2></div><section class="panel">${barChart(st.byMonth.map((m) => ({ label: monthShort(m.ym), value: m.count, tip: `${monthLabel(m.ym)} : ${plural(m.count, "partie", "parties")}` })), { height: 120 })}</section>
-    <div class="sec-h"><h2>Par jeu</h2></div><section class="panel"><table class="tbl"><thead><tr><th>Jeu</th><th class="n">Parties</th><th class="n">Vict.</th><th class="n">Taux</th><th class="n">Meilleur</th></tr></thead>
-      <tbody>${st.games.map((l) => `<tr data-href="#/games/${l.game.id}"><td>${esc(l.game.name)}</td><td class="n">${l.plays}</td>
-        <td class="n">${l.comp ? l.wins : l.coop ? `${l.coopWins}<span class="muted small">/${l.coop}</span>` : "—"}</td><td class="n">${l.comp ? rate(l.rate, l.comp) : l.coop ? rate(l.coopRate, l.coop) : "—"}</td>
-        <td class="n">${fmtScore(l.best)}</td></tr>`).join("")}</tbody></table>
-      <p class="foot muted small">En coopératif et solo, les colonnes indiquent les réussites.</p></section>
-    ${h2h.length ? `<div class="sec-h"><h2>Face-à-face</h2></div><section class="panel">
-      <table class="tbl"><thead><tr><th>Adversaire</th><th class="n">Parties</th><th class="n">Devant</th><th class="n">Derrière</th></tr></thead>
-      <tbody>${h2h.map((r) => `<tr data-href="#/players/${r.player_id}"><td>${dot(player(r.player_id))}${pname(r.player_id)}</td><td class="n">${r.plays}</td>
-        <td class="n ${r.ahead > r.behind ? "good" : ""}">${r.ahead}</td><td class="n ${r.behind > r.ahead ? "bad" : ""}">${r.behind}</td></tr>`).join("")}</tbody></table>
-      ${explain(`<p>Pour chaque adversaire, le bilan de vos parties compétitives communes : combien de fois ${esc(p.name)} a fini <strong>devant</strong> lui (meilleur rang) et combien de fois <strong>derrière</strong>. Les égalités ne sont comptées ni d'un côté ni de l'autre.</p>
-        <p>Exemple : dans une partie à 4 où ${esc(p.name)} finit 2e, il est « devant » les 3e et 4e, et « derrière » le 1er.</p>
-        <p class="muted">En équipes, les coéquipiers ne s'affrontent pas. Parties d'apprentissage exclues.</p>`)}</section>` : ""}
-    ${elos.length ? `<div class="sec-h"><h2>Niveau Elo par jeu</h2></div><section class="panel">
-      <table class="tbl"><thead><tr><th>Jeu</th><th class="n">Elo</th><th class="n">Place</th></tr></thead>
-      <tbody>${elos.map((e) => `<tr data-href="#/games/${e.game.id}"><td>${esc(e.game.name)}</td><td class="n"><strong class="${e.plays < MIN_SAMPLE ? "thin" : ""}">${fmtNum(Math.round(e.rating))}</strong></td>
-        <td class="n">${e.pos}<span class="muted small">/${e.of}</span></td></tr>`).join("")}</tbody></table>
-      ${explain(ELO_EXPLAIN, "L'Elo, c'est quoi ?")}</section>` : ""}
-    <div class="sec-h"><h2>Dernières parties</h2></div><div class="list">${st.plays.slice(0, 6).map(playCard).join("")}</div>`
-    : `<div class="empty"><p class="muted">Aucune partie pour l'instant.</p></div>`}`;
+    ${gamesList}
+    ${duels}
+    <div class="sec-h"><h2>Activité</h2><span class="muted small">12 mois</span></div><section class="panel">${barChart(st.byMonth.map((m) => ({ label: monthShort(m.ym), value: m.count, tip: `${monthLabel(m.ym)} : ${plural(m.count, "partie", "parties")}` })), { height: 110 })}</section>
+    <div class="sec-h"><h2>Dernières parties</h2></div><div class="list">${st.plays.slice(0, 6).map(playCard).join("")}</div></div>`;
 }
 
 function viewPlayerForm(id) {

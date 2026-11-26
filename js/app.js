@@ -11,7 +11,7 @@ import {
   eloForGame, headToHead, nemesis, favouriteVictim, ELO_START,
 } from "./stats.js";
 
-const VERSION = "1.1.2 (lot 2)";
+const VERSION = "1.2.0 (nouveau look)";
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
@@ -137,6 +137,7 @@ function render() {
   let html;
   try {
     if (!a) html = viewHome();
+    else if (a === "ranking") html = viewRanking();
     else if (a === "plays" && b === "new") html = viewPlayForm(null, query);
     else if (a === "plays" && b === "deleted") html = viewDeletedPlays();
     else if (a === "plays" && b && c === "edit") html = viewPlayForm(b, query);
@@ -175,10 +176,10 @@ function afterRender(a, b, c) {
 const notFound = () => `<div class="empty"><p>Page introuvable.</p><a class="btn" href="#/">Retour à l'accueil</a></div>`;
 
 // ---------- Composants communs -----------------------------------------
-function header(title, { back, actions = "", sub = "" } = {}) {
+function header(title, { back, actions = "", sub = "", above = "" } = {}) {
   return `<header class="top">
     ${back ? `<a class="icon-btn" href="${back}" aria-label="Retour">${icon("back", 22)}</a>` : ""}
-    <div class="top-title"><h1>${esc(title)}</h1>${sub ? `<p class="sub">${sub}</p>` : ""}</div>
+    <div class="top-title">${above ? `<p class="sub-above">${above}</p>` : ""}<h1>${esc(title)}</h1>${sub ? `<p class="sub">${sub}</p>` : ""}</div>
     <div class="top-actions">${actions}</div>
   </header>`;
 }
@@ -191,7 +192,8 @@ function gameThumb(g, size = 48) {
     : `<div class="thumb ph" style="width:${size}px;height:${size}px;font-size:${Math.round(size / 2.8)}px">${esc(initials(g.name))}</div>`;
 }
 
-const dot = (p) => `<span class="pdot" style="background:${esc(p?.color || "#888")}"></span>`;
+// Avatar rond à initiales, dans la couleur du joueur (style A).
+const dot = (p, size) => `<span class="av" style="background:${esc(p?.color || "#8a8a8e")}${size ? `;--s:${size}px` : ""}" aria-hidden="true">${esc(initials(p?.name || "?"))}</span>`;
 const pname = (id) => esc(player(id)?.name || "Joueur supprimé");
 
 function periodChips() {
@@ -208,6 +210,7 @@ const ELO_EXPLAIN = `<p>Le classement <strong>Elo</strong> est celui des échecs
   <p class="muted">Les parties d'apprentissage et coopératives ne comptent pas. Valeurs grisées : moins de ${MIN_SAMPLE} parties, niveau encore peu fiable.</p>`;
 // Encadré « C'est quoi ? » repliable, pour expliquer un indicateur directement dans l'app.
 const explain = (html, label = "C'est quoi ?") => `<details class="explain"><summary>${label}</summary><div class="small">${html}</div></details>`;
+const fmtDuration = (m) => (m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? " " + String(m % 60).padStart(2, "0") : ""}` : `${m} min`);
 const fmt2 = (x) => x.toFixed(2).replace(".", ","); // indice : toujours 2 décimales
 const signed = (v) => `${v >= 0 ? "+" : "−"}${fmtNum(Math.abs(Math.round(v)))}`;
 
@@ -235,7 +238,7 @@ function barChart(rows, { label = (r) => r.label, height = 150 } = {}) {
   const max = Math.max(1, ...rows.map((r) => r.value));
   const top = rows.reduce((m, r, i) => (r.value > rows[m].value ? i : m), 0);
   return `<div class="bars" style="--h:${height}px" role="img" aria-label="${esc(rows.map((r) => r.tip).join(" ; "))}">
-    ${rows.map((r, i) => `<div class="bcol" data-tip="${esc(r.tip)}">
+    ${rows.map((r, i) => `<div class="bcol ${r.cur ? "cur" : ""}" data-tip="${esc(r.tip)}">
       <div class="bwrap">${i === top && r.value > 0 ? `<span class="bval">${r.value}</span>` : ""}
         <div class="bfill" style="height:${(r.value / max) * 100}%"></div></div>
       <span class="blbl">${esc(label(r))}</span></div>`).join("")}</div>`;
@@ -289,7 +292,9 @@ function playCard(p) {
     </div></a>`;
 }
 
-const fab = (href, label) => isAdmin() ? `<a class="fab" href="${href}" aria-label="${esc(label)}">${icon("plus", 26)}</a>` : "";
+// Style A : plus de bouton flottant, un « + » dans l'en-tête comme sur iOS.
+const fab = () => "";
+const addBtn = (href, label) => isAdmin() ? `<a class="icon-btn add" href="${href}" aria-label="${esc(label)}">${icon("plus", 24)}</a>` : "";
 
 // ---------- Accueil ------------------------------------------------------
 function chartMonths(period) {
@@ -301,7 +306,7 @@ function chartMonths(period) {
 function monthRows(plays, period) {
   return chartMonths(period).map((ym) => {
     const n = plays.filter((p) => p.played_at.startsWith(ym)).length;
-    return { label: monthShort(ym), value: n, tip: `${monthLabel(ym)} : ${plural(n, "partie", "parties")}` };
+    return { label: monthShort(ym), value: n, cur: ym === new Date().toISOString().slice(0, 7), tip: `${monthLabel(ym)} : ${plural(n, "partie", "parties")}` };
   });
 }
 
@@ -310,10 +315,28 @@ const appNotice = () => S.webOnly ? `<section class="panel demo-panel"><h2>C-Par
   <p class="small">Vos vraies parties sont désormais dans l'app <strong>C-Party</strong>, enregistrées dans iCloud. Ce site n'est plus qu'une démo avec des données fictives.</p>
   <p class="small">Pour rejoindre ton groupe : installe <strong>TestFlight</strong> depuis l'App Store, ouvre l'invitation C-Party reçue, puis touche le lien de partage envoyé par ton gestionnaire.</p></section>` : "";
 
+// Filtres de statistiques (accueil et classement) : une pastille qui résume, un panneau qui s'ouvre.
+function filterSummary() {
+  const parts = [PERIODS[S.ui.period] || "Tout"];
+  if (S.ui.statPlayers) parts.push(S.ui.statPlayers === 5 ? "5 joueurs et +" : `${S.ui.statPlayers} joueurs`);
+  parts.push(S.ui.statKind ? S.ui.statKind.slice(2) : "tous les jeux");
+  return parts.join(" · ");
+}
+function filterBar() {
+  const on = S.ui.period !== "all" || S.ui.statPlayers || S.ui.statKind;
+  return `<button class="filter-pill ${on ? "on" : ""}" data-action="filters" aria-expanded="${!!S.ui.filtersOpen}">${icon("filter", 15)} ${esc(filterSummary())}</button>
+    ${S.ui.filtersOpen ? `<div class="filter-box">${periodChips()}${statFilters()}
+      <div class="form-actions">${on ? `<button class="btn small ghost" data-action="filters-reset">Tout afficher</button>` : ""}<button class="btn small primary" data-action="filters">OK</button></div></div>` : ""}`;
+}
+const filteredPlays = () => filterPlays(S.data.plays, { period: S.ui.period, nbPlayers: S.ui.statPlayers, kind: S.ui.statKind, games: S.data.games });
+const sinceLabel = (d) => {
+  const days = Math.round((new Date(new Date().toISOString().slice(0, 10)) - new Date(d)) / 86400000);
+  return days <= 0 ? "aujourd'hui" : days === 1 ? "hier" : days < 7 ? `il y a ${days} jours` : fmtDate(d);
+};
+
 function viewHome() {
-  const plays = filterPlays(S.data.plays, { period: S.ui.period, nbPlayers: S.ui.statPlayers, kind: S.ui.statKind, games: S.data.games });
+  const plays = filteredPlays();
   const st = globalStats(S.data, plays);
-  const recent = playsSorted().slice(0, 5);
   if (!S.data.plays.length) {
     return header("C-Party") + `<div class="empty">
       <p><strong>Aucune partie pour l'instant.</strong></p>
@@ -323,21 +346,45 @@ function viewHome() {
     </div>` + fab("#/plays/new", "Nouvelle partie");
   }
   const myPlayer = S.data.me.player_id && player(S.data.me.player_id);
-  return header("C-Party", { sub: myPlayer ? `Bonjour ${esc(myPlayer.name)}` : "" }) + appNotice() + `
-    ${periodChips()}
-    ${statFilters()}
+  const all = playsSorted();
+  const last = all[0], lastGame = game(last.game_id);
+  const top = sortLeaderboard(st.leaderboard).slice(0, 3);
+  const meBtn = myPlayer ? `<a href="#/players/${myPlayer.id}" aria-label="Ma fiche">${dot(myPlayer, 36).replace('class="av"', 'class="av me-av"')}</a>` : "";
+  const covers = st.topGames.slice(0, 10);
+  return header("C-Party", { above: myPlayer ? `Bonjour ${esc(myPlayer.name)}` : "", actions: meBtn }) + appNotice() + `
+    ${filterBar()}
+    <a class="last-play" href="#/plays/${last.id}">${gameThumb(lastGame, 56)}
+      <div class="lp-body"><div class="lp-k">Dernière partie · ${sinceLabel(last.played_at)}</div>
+        <strong>${esc(lastGame?.name || "Jeu supprimé")}</strong>
+        <div class="small">${playResultLine(last)} <span class="muted">· ${plural(last.players.length, "joueur", "joueurs")}</span></div></div></a>
+    <div class="quick">${isAdmin() ? `<a class="primary" href="#/plays/new">${icon("plus", 18)} Nouvelle partie</a>` : ""}<a href="#/games">${icon("dice", 18)} Que jouer ?</a></div>
     <section class="kpis">
       ${kpi("parties", fmtNum(st.count), st.learning ? `dont ${st.learning} d'apprentissage` : "")}
       ${kpi("de jeu", fmtHours(st.minutes))}
       ${kpi("jeux joués", fmtNum(st.gamesPlayed))}
       ${kpi("joueurs", fmtNum(st.playersActive))}
     </section>
+    <div class="sec-h"><h2>En forme</h2><a href="#/ranking">Classement ›</a></div>
+    ${top.length ? `<div class="list">${top.map((l, i) => `<a class="card" href="#/players/${l.player.id}"><span class="rk">${i + 1}</span>${dot(l.player, 30)}
+      <span style="flex:1;min-width:0" class="${i === 0 ? "strong" : ""}">${esc(l.player.name)}</span>
+      <span class="muted small">${l.comp ? `${l.wins} vict. · ${rate(l.rate, l.comp)}` : plural(l.plays, "partie", "parties")}</span></a>`).join("")}</div>`
+      : `<p class="pad muted small">Aucune partie compétitive sur cette période.</p>`}
+    ${st.coop.plays ? `<p class="pad small muted" style="margin-top:8px">Coopératif et solo : ${plural(st.coop.wins, "réussite", "réussites")} sur ${st.coop.plays} (${fmtPct(st.coop.wins / st.coop.plays)})</p>` : ""}
+    <div class="sec-h"><h2>Activité</h2><span class="muted small">${esc(PERIODS[S.ui.period] === "Tout" ? "12 derniers mois" : PERIODS[S.ui.period])}</span></div>
+    <section class="panel">${barChart(monthRows(plays, S.ui.period), { height: 96 })}</section>
+    ${covers.length ? `<div class="sec-h"><h2>Jeux les plus joués</h2><a href="#/games">Tout ›</a></div>
+      <div class="covers">${covers.map((t) => `<a href="#/games/${t.game.id}">${gameThumb(t.game, 96)}
+        <div class="cv-n">${esc(t.game.name)}</div><div class="cv-c">${plural(t.count, "partie", "parties")}</div></a>`).join("")}</div>` : ""}
+    <div class="sec-h"><h2>Dernières parties</h2><a href="#/plays">Tout ›</a></div>
+    <div class="list">${all.slice(0, 5).map(playCard).join("")}</div>`;
+}
+
+// Classement complet (ancien tableau de l'accueil), avec tris et explications.
+function viewRanking() {
+  const st = globalStats(S.data, filteredPlays());
+  return header("Classement", { back: "#/" }) + `
+    ${filterBar()}
     <section class="panel">
-      <h2>Parties par mois</h2>
-      ${barChart(monthRows(plays, S.ui.period))}
-    </section>
-    <section class="panel">
-      <h2>Classement</h2>
       ${st.leaderboard.length ? `<table class="tbl">
         <thead><tr><th>Joueur</th>${[["plays", "Parties"], ["wins", "Vict."], ["rate", "Taux"], ["perf", "Indice"]].map(([k, v]) =>
           `<th class="n"><button class="th-sort ${S.ui.lbSort === k ? "on" : ""}" data-action="lb-sort" data-v="${k}" aria-label="Classer par ${v.toLowerCase()}">${v}${S.ui.lbSort === k ? " ▾" : ""}</button></th>`).join("")}</tr></thead>
@@ -352,14 +399,7 @@ function viewHome() {
           <p>Exemple : 4 victoires en 12 parties à 5 joueurs donnent un taux de 33 %, qui paraît moyen. Mais le hasard n'en promettait que 2,4 : l'indice vaut 4 ÷ 2,4 ≈ 1,7, une très bonne performance.</p>
           <p class="muted">Valeurs grisées : moins de ${MIN_SAMPLE} parties, peu significatif.</p>`, "Taux et indice : c'est quoi ?")}` : `<p class="muted">Aucune partie sur cette période.</p>`}
       ${st.coop.plays ? `<p class="coopline">Coopératif et solo : <strong>${plural(st.coop.wins, "réussite", "réussites")}</strong> sur ${st.coop.plays} (${fmtPct(st.coop.wins / st.coop.plays)})</p>` : ""}
-    </section>
-    ${st.topGames.length ? `<section class="panel"><h2>Jeux les plus joués</h2>
-      ${hbars(st.topGames.slice(0, 6).map((t) => ({ label: t.game.name, value: t.count, href: `#/games/${t.game.id}` })))}</section>` : ""}
-    <section class="panel">
-      <div class="panel-head"><h2>Dernières parties</h2><a href="#/plays" class="small">Tout voir</a></div>
-      <div class="list">${recent.map(playCard).join("")}</div>
-    </section>
-    ${fab("#/plays/new", "Nouvelle partie")}`;
+    </section>`;
 }
 
 // ---------- Parties : liste --------------------------------------------
@@ -374,7 +414,7 @@ function viewPlays() {
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(p);
   });
-  return header("Parties", { sub: plural(S.data.plays.length, "partie enregistrée", "parties enregistrées") }) + `
+  return header("Parties", { sub: plural(S.data.plays.length, "partie enregistrée", "parties enregistrées"), actions: addBtn("#/plays/new", "Nouvelle partie") }) + `
     <div class="search">${icon("search", 18)}<input type="search" placeholder="Jeu ou joueur" value="${esc(S.ui.playQuery)}" data-input="playQuery" aria-label="Rechercher une partie"></div>
     ${plays.length ? [...groups.entries()].map(([ym, ps]) => `<section class="group">
       <h2 class="group-h">${monthLabel(ym)} <span class="muted">· ${ps.length}</span></h2>
@@ -392,44 +432,44 @@ function viewPlay(id) {
   const actions = `<button class="icon-btn" data-action="share-play" data-id="${p.id}" aria-label="Partager le résultat">${icon("share")}</button>` +
     (isAdmin() ? `<a class="icon-btn" href="#/plays/${p.id}/edit" aria-label="Modifier">${icon("edit")}</a>
     <button class="icon-btn" data-action="delete-play" data-id="${p.id}" aria-label="Supprimer">${icon("trash")}</button>` : "");
+  const hasScore = p.players.some((x) => x.score != null && x.score !== "");
+  const deltas = isComp(p) ? eloForGame(S.data.plays, p.game_id).deltas.get(p.id) : null;
+  const eloCell = (id) => deltas && deltas[id] != null ? `<span class="elo ${deltas[id] > 0 ? "good" : deltas[id] < 0 ? "bad" : "muted"}">${signed(deltas[id])}</span>` : "";
+  const scoreCell = (v) => hasScore ? `<span class="sc">${fmtScore(v)}</span>` : "";
   let results;
   if (p.mode === "coop" || p.mode === "solo") {
     results = `<div class="banner ${p.coop_result === "win" ? "win" : "loss"}">${p.coop_result === "win" ? icon("trophy", 20) + " Victoire" : "Défaite"}${p.mode === "coop" ? " collective" : ""}</div>
-      <ul class="results">${p.players.map((x) => `<li>${dot(player(x.player_id))}<a href="#/players/${x.player_id}">${pname(x.player_id)}</a>${x.score != null ? `<span class="sc">${fmtScore(x.score)}</span>` : ""}</li>`).join("")}</ul>`;
+      <ul class="res-list">${p.players.map((x) => `<li>${dot(player(x.player_id), 30)}<a class="nm" href="#/players/${x.player_id}">${pname(x.player_id)}</a>${scoreCell(x.score)}</li>`).join("")}</ul>`;
   } else if (p.mode === "teams") {
     const teams = new Map();
     p.players.forEach((x) => { const t = x.team || "Sans équipe"; if (!teams.has(t)) teams.set(t, []); teams.get(t).push(x); });
     results = [...teams.entries()].sort((a, b) => (a[1][0].rank ?? 99) - (b[1][0].rank ?? 99)).map(([t, xs]) => `
       <div class="team ${xs[0].is_winner ? "won" : ""}"><div class="team-h"><span class="rk">${xs[0].rank ?? "–"}</span><strong>${esc(t)}</strong>
-      ${xs[0].score != null ? `<span class="sc">${fmtScore(xs[0].score)}</span>` : ""}${xs[0].is_winner ? icon("trophy", 16, "tr") : ""}</div>
-      <div class="muted">${xs.map((x) => `<a href="#/players/${x.player_id}">${pname(x.player_id)}</a>`).join(", ")}</div></div>`).join("");
+      ${xs[0].is_winner ? icon("trophy", 16, "tr") : ""}${xs[0].score != null ? `<span class="sc">${fmtScore(xs[0].score)}</span>` : ""}</div>
+      <ul class="res-list">${xs.map((x) => `<li><span class="rk"></span>${dot(player(x.player_id), 26)}<a class="nm" href="#/players/${x.player_id}">${pname(x.player_id)}</a>${eloCell(x.player_id)}</li>`).join("")}</ul></div>`).join("");
   } else {
-    results = `<ul class="results">${[...p.players].sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99)).map((x) => `
-      <li class="${x.is_winner ? "won" : ""}"><span class="rk">${x.rank ?? "–"}</span>${dot(player(x.player_id))}
-      <a href="#/players/${x.player_id}">${pname(x.player_id)}</a>${x.is_winner ? icon("trophy", 16, "tr") : ""}
-      <span class="sc">${fmtScore(x.score)}</span></li>`).join("")}</ul>`;
+    results = `<ul class="res-list">${[...p.players].sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99)).map((x) => `
+      <li class="${x.is_winner ? "won" : ""}"><span class="rk">${x.rank ?? "–"}</span>${dot(player(x.player_id), 30)}
+      <span class="nm"><a href="#/players/${x.player_id}">${pname(x.player_id)}</a>${x.is_winner ? icon("trophy", 16, "tr") : ""}</span>
+      ${scoreCell(x.score)}${eloCell(x.player_id)}</li>`).join("")}</ul>`;
   }
   const exps = (p.expansions || []).map(game).filter(Boolean);
   const creator = profile(p.created_by);
-  const deltas = isComp(p) ? eloForGame(S.data.plays, p.game_id).deltas.get(p.id) : null;
-  if (deltas) results += `<p class="elo-line small muted">Elo : ${Object.entries(deltas).sort((a, b) => b[1] - a[1])
-    .map(([id, v]) => `${pname(id)} <span class="${v >= 0 ? "good" : "bad"}">${signed(v)}</span>`).join(" · ")}
-    ${g ? ` · <a href="#/games/${g.id}">classement</a>` : ""}</p>`;
-  else if (p.is_learning && p.mode !== "coop" && p.mode !== "solo") results += `<p class="elo-line small muted">Partie d'apprentissage : pas de points Elo.</p>`;
-  return header(g?.name || "Jeu supprimé", { back: "#/plays", actions, sub: `${fmtDate(p.played_at)} · ${MODES[p.mode]}${p.is_learning ? " · Apprentissage" : ""}` }) + `
+  if (deltas) results += `<p class="res-foot"><span>Points Elo gagnés ou perdus</span>${g ? `<a href="#/games/${g.id}">Classement Elo ›</a>` : ""}</p>`;
+  else if (p.is_learning && p.mode !== "coop" && p.mode !== "solo") results += `<p class="res-foot">Partie d'apprentissage : pas de points Elo.</p>`;
+  const sub = [fmtDate(p.played_at), p.mode !== "competitive" ? MODES[p.mode] : "", p.duration_min ? fmtDuration(p.duration_min) : "",
+    plural(p.players.length, "joueur", "joueurs"), p.is_learning ? "Apprentissage" : ""].filter(Boolean).join(" · ");
+  return header(g?.name || "Jeu supprimé", { back: "#/plays", actions, sub }) + `
     <section class="panel">${results}</section>
-    <section class="panel facts">
-      ${p.duration_min ? `<div>${icon("clock", 16)} ${p.duration_min} min</div>` : ""}
-      ${exps.length ? `<div>${icon("puzzle", 16)} ${exps.map((e) => esc(e.name)).join(", ")}</div>` : ""}
-      ${p.notes ? `<div class="note">${esc(p.notes)}</div>` : ""}
-      ${g ? `<div><a href="#/games/${g.id}">Voir la fiche du jeu</a></div>` : ""}
-    </section>
-    ${p.photo_count || isAdmin() ? `<section class="panel">
-      <div class="panel-head"><h2>${icon("camera", 18)} Photos</h2>${isAdmin() ? photoPicker(`data-add-photos="${p.id}"`, "Ajouter") : ""}</div>
+    <div class="rows">
+      ${exps.length ? `<div><span class="lbl">${icon("puzzle", 16)} Extensions</span><span class="val">${exps.map((e) => esc(e.name)).join(", ")}</span></div>` : ""}
+      ${p.notes ? `<div><p class="note">${esc(p.notes)}</p></div>` : ""}
+      ${g ? `<a href="#/games/${g.id}">${gameThumb(g, 30)}<span>Fiche du jeu</span><span class="chev">›</span></a>` : ""}
+    </div>
+    ${p.photo_count || isAdmin() ? `<div class="sec-h"><h2>Photos</h2>${isAdmin() ? photoPicker(`data-add-photos="${p.id}"`, "Ajouter") : ""}</div><section class="panel">
       <div id="photos" class="photos">${p.photo_count ? `<p class="muted small">Chargement…</p>` : `<p class="muted small">Aucune photo pour l'instant.</p>`}</div>
     </section>` : ""}
-    <section class="panel">
-      <h2>${icon("history", 18)} Historique</h2>
+    <div class="sec-h"><h2>Historique</h2></div><section class="panel">
       <p class="muted small">Saisie${p.created_at ? ` le ${fmtDateTime(p.created_at)}` : ""}${creator ? ` par ${esc(creator.display_name || creator.email)}` : ""}</p>
       <div id="history" class="history"><p class="muted small">Chargement…</p></div>
     </section>`;
@@ -791,7 +831,7 @@ function viewGames() {
         <div class="small">${plural(n, "partie", "parties")}${S.ui.gameSort === "forgotten" && n ? ` · ${ago(last.get(g.id))}` : ""}${exps ? ` · ${plural(exps, "extension", "extensions")}` : ""}${g.status === "lent" ? ` · <span class="tag">Prêté${g.lent_to ? " à " + esc(g.lent_to) : ""}</span>` : g.status === "elsewhere" ? ` · <span class="tag">Joué ailleurs</span>` : ""}</div>
         </div></a>`;
   };
-  const actions = isAdmin() ? `<a class="icon-btn" href="#/games/import" aria-label="Synchroniser avec BGG">${icon("sync")}</a>` : "";
+  const actions = isAdmin() ? `<a class="icon-btn" href="#/games/import" aria-label="Synchroniser avec BGG">${icon("sync")}</a>${addBtn("#/games/new", "Ajouter un jeu")}` : "";
   return header("Jeux", { sub: plural(total, "jeu", "jeux"), actions }) + `
     <div class="search">${icon("search", 18)}<input type="search" placeholder="Rechercher un jeu" value="${esc(S.ui.gameQuery)}" data-input="gameQuery" aria-label="Rechercher un jeu"></div>
     <div class="chips">${[["all", "Tous"], ...Object.entries(STATUS)].map(([k, v]) =>
@@ -830,7 +870,7 @@ function viewGame(id) {
   return header(g.name, { back: "#/games", actions, sub }) + `
     ${g.image_url ? `<div class="hero"><img src="${esc(g.image_url)}" alt="Boîte de ${esc(g.name)}" referrerpolicy="no-referrer"></div>` : ""}
     ${gameFacts(g)}
-    ${exps.length ? `<section class="panel"><h2>Extensions</h2><ul class="plain">${exps.map((e) => `<li><a href="#/games/${e.id}">${icon("puzzle", 14)} ${esc(e.name)}</a></li>`).join("")}</ul></section>` : ""}
+    ${exps.length ? `<div class="sec-h"><h2>Extensions</h2></div><section class="panel"><ul class="plain">${exps.map((e) => `<li><a href="#/games/${e.id}">${icon("puzzle", 14)} ${esc(e.name)}</a></li>`).join("")}</ul></section>` : ""}
     <section class="kpis">
       ${kpi("parties", fmtNum(st.count))}
       ${kpi("de jeu", fmtHours(st.minutes))}
@@ -840,20 +880,20 @@ function viewGame(id) {
     ${st.record ? `<section class="panel record">${icon("trophy", 22, "tr")}<div><div class="muted small">Record (${g.score_rule === "low" ? "score le plus bas" : "meilleur score"})</div>
       <strong>${fmtScore(st.record.score)}</strong> par ${pname(st.record.player_id)} <span class="muted small">le ${fmtDate(st.record.date)}</span>
       ${st.avgScore != null ? `<div class="muted small">Score moyen : ${fmtScore(Math.round(st.avgScore * 10) / 10)}</div>` : ""}</div></section>` : ""}
-    ${st.byPlayer.length ? `<section class="panel"><h2>Par joueur</h2>
+    ${st.byPlayer.length ? `<div class="sec-h"><h2>Par joueur</h2></div><section class="panel">
       <table class="tbl"><thead><tr><th>Joueur</th><th class="n">Parties</th><th class="n">Vict.</th><th class="n">Taux</th>${g.score_rule !== "none" ? `<th class="n">Meilleur</th>` : ""}</tr></thead>
       <tbody>${st.byPlayer.map((l) => `<tr data-href="#/players/${l.player.id}"><td>${dot(l.player)}${esc(l.player.name)}</td>
         <td class="n">${l.plays}</td><td class="n">${l.comp ? l.wins : "—"}</td><td class="n">${l.comp ? rate(l.rate, l.comp) : "—"}</td>
         ${g.score_rule !== "none" ? `<td class="n">${fmtScore(l.best)}</td>` : ""}</tr>`).join("")}</tbody></table>
       ${st.coop.plays ? `<p class="coopline">Coopératif et solo : <strong>${plural(st.coop.wins, "réussite", "réussites")}</strong> sur ${st.coop.plays} (${fmtPct(st.coop.wins / st.coop.plays)})</p>` : ""}
     </section>` : ""}
-    ${elo.ranking.length ? `<section class="panel"><h2>Classement Elo</h2>
+    ${elo.ranking.length ? `<div class="sec-h"><h2>Classement Elo</h2></div><section class="panel">
       <table class="tbl"><thead><tr><th>Joueur</th><th class="n">Elo</th><th class="n">Parties</th></tr></thead>
       <tbody>${elo.ranking.map((r, i) => `<tr data-href="#/players/${r.player_id}"><td><span class="rk">${i + 1}</span>${dot(player(r.player_id))}${pname(r.player_id)}</td>
         <td class="n"><strong class="${r.plays < MIN_SAMPLE ? "thin" : ""}">${fmtNum(Math.round(r.rating))}</strong></td><td class="n">${r.plays}</td></tr>`).join("")}</tbody></table>
       ${explain(ELO_EXPLAIN, "L'Elo, c'est quoi ?")}</section>` : ""}
-    ${st.count ? `<section class="panel"><h2>Parties sur 12 mois</h2>${barChart(st.byMonth.map((m) => ({ label: monthShort(m.ym), value: m.count, tip: `${monthLabel(m.ym)} : ${plural(m.count, "partie", "parties")}` })), { height: 120 })}</section>
-      <section class="panel"><div class="panel-head"><h2>Dernières parties</h2></div><div class="list">${st.plays.slice(0, 5).map(playCard).join("")}</div></section>` : ""}
+    ${st.count ? `<div class="sec-h"><h2>Parties sur 12 mois</h2></div><section class="panel">${barChart(st.byMonth.map((m) => ({ label: monthShort(m.ym), value: m.count, tip: `${monthLabel(m.ym)} : ${plural(m.count, "partie", "parties")}` })), { height: 120 })}</section>
+      <div class="sec-h"><h2>Dernières parties</h2></div><div class="list">${st.plays.slice(0, 5).map(playCard).join("")}</div>` : ""}
     ${isAdmin() ? `<p class="center"><a class="btn primary" href="#/plays/new?game=${g.id}">${icon("plus", 18)} Nouvelle partie de ce jeu</a></p>` : ""}
     ${g.bgg_id ? `<p class="center small muted">Source : <a href="https://boardgamegeek.com/boardgame/${g.bgg_id}" target="_blank" rel="noopener">BoardGameGeek</a></p>` : ""}`;
 }
@@ -861,7 +901,7 @@ function viewGame(id) {
 function gameFacts(g) {
   const range = (a, b, unit = "") => (a ? `${a}${b && b !== a ? `–${b}` : ""}${unit}` : "—");
   const img = g.cover || g.image_url || g.thumbnail_url;
-  return `${img ? `<div class="game-hero"><img src="${esc(img)}" alt="" referrerpolicy="no-referrer"></div>` : ""}<section class="panel">
+  return `<div class="game-hero">${img ? `<img src="${esc(img)}" alt="" referrerpolicy="no-referrer">` : gameThumb(g, 132)}</div><section class="panel">
     ${g.types?.length ? `<div class="chips wrap static">${g.types.map((t) => `<span class="chip on">${esc(t)}</span>`).join("")}</div>` : ""}
     <dl class="facts-grid">
       <div><dt>Joueurs</dt><dd>${range(g.min_players, g.max_players)}</dd></div>
@@ -1010,7 +1050,7 @@ function viewImport() {
       <p class="hint">${esc(im.progress)}</p>
       <div class="form-actions"><button class="btn primary" type="submit" ${im.step === "loading" ? "disabled" : ""}>${im.step === "loading" ? "Récupération…" : "Récupérer ma collection"}</button></div>
     </form>
-    <section class="panel"><h2>Ou avec le fichier de ta collection</h2>
+    <div class="sec-h"><h2>Ou avec le fichier de ta collection</h2></div><section class="panel">
       <p class="small">Sur le site BoardGameGeek, ouvre ta collection et exporte-la en CSV (lien « Export »), puis choisis le fichier ici. Pas besoin de connexion à BGG depuis l'app.</p>
       <label class="btn block">${icon("download", 18)} Choisir le fichier CSV de BGG<input type="file" accept=".csv,text/csv,text/comma-separated-values" data-bgg-csv hidden></label>
       <p class="small muted">Le fichier ne contient ni pochettes ni mécaniques : seuls l'année, le nombre de joueurs, la durée et la difficulté sont repris.</p></section>`;
@@ -1038,7 +1078,7 @@ function viewImport() {
   } else if (im.step === "review") {
     const nGone = Object.values(im.sel.gone).filter(Boolean).length;
     const nNew = im.details.filter((d) => !d._isExpansion || d._baseName).length;
-    body = `${im.updates.length || nGone ? `<section class="panel"><h2>Modifications</h2><ul class="plain small">
+    body = `${im.updates.length || nGone ? `<div class="sec-h"><h2>Modifications</h2></div><section class="panel"><ul class="plain small">
         ${im.updates.length ? `<li>${icon("check", 14)} ${plural(im.updates.length, "fiche complétée", "fiches complétées")} : ${im.updates.map((u) => esc(u.game.name)).join(", ")}</li>` : ""}
         ${nGone ? `<li>${icon("check", 14)} ${plural(nGone, "jeu marqué", "jeux marqués")} « joué ailleurs »</li>` : ""}</ul></section>` : ""}
       ${im.details.length ? `<p class="pad">Nouveaux jeux : vérifie le nom affiché de chacun. BGG ne précise pas la langue des noms : le nom français est deviné.</p>` : ""}
@@ -1133,7 +1173,7 @@ function viewPlayers() {
       <div class="muted small">${plural(counts.get(p.id) || 0, "partie", "parties")}${l?.comp ? ` · ${plural(l.wins, "victoire", "victoires")} · ${fmtPct(l.rate)}` : ""}</div></div></a>`;
   };
   const archived = S.data.players.filter((p) => p.archived);
-  return header("Joueurs", { sub: plural(activePlayers().length, "joueur", "joueurs") }) + `
+  return header("Joueurs", { sub: plural(activePlayers().length, "joueur", "joueurs"), actions: addBtn("#/players/new", "Ajouter un joueur") }) + `
     <div class="list">${activePlayers().map(row).join("") || `<div class="empty"><p class="muted">Aucun joueur.</p></div>`}</div>
     ${archived.length ? `<details class="pad"><summary class="muted">Joueurs archivés (${archived.length})</summary><div class="list">${archived.map(row).join("")}</div></details>` : ""}
     ${fab("#/players/new", "Ajouter un joueur")}`;
@@ -1173,25 +1213,25 @@ function viewPlayer(id) {
         <p>La <strong>victime favorite</strong>, c'est l'inverse : l'adversaire que ${esc(p.name)} devance le plus souvent.</p>
         <p class="muted">« Finir devant » = avoir un meilleur rang dans la partie. En équipes, seuls les joueurs de l'équipe adverse comptent. Parties d'apprentissage exclues.</p>`)}</section>` : ""}
     ${st.coop ? `<p class="coopline pad">Coopératif et solo : <strong>${plural(st.coopWins, "réussite", "réussites")}</strong> sur ${st.coop} (${fmtPct(st.coopRate)})</p>` : ""}
-    ${st.plays.length ? `<section class="panel"><h2>Parties sur 12 mois</h2>${barChart(st.byMonth.map((m) => ({ label: monthShort(m.ym), value: m.count, tip: `${monthLabel(m.ym)} : ${plural(m.count, "partie", "parties")}` })), { height: 120 })}</section>
-    <section class="panel"><h2>Par jeu</h2><table class="tbl"><thead><tr><th>Jeu</th><th class="n">Parties</th><th class="n">Vict.</th><th class="n">Taux</th><th class="n">Meilleur</th></tr></thead>
+    ${st.plays.length ? `<div class="sec-h"><h2>Parties sur 12 mois</h2></div><section class="panel">${barChart(st.byMonth.map((m) => ({ label: monthShort(m.ym), value: m.count, tip: `${monthLabel(m.ym)} : ${plural(m.count, "partie", "parties")}` })), { height: 120 })}</section>
+    <div class="sec-h"><h2>Par jeu</h2></div><section class="panel"><table class="tbl"><thead><tr><th>Jeu</th><th class="n">Parties</th><th class="n">Vict.</th><th class="n">Taux</th><th class="n">Meilleur</th></tr></thead>
       <tbody>${st.games.map((l) => `<tr data-href="#/games/${l.game.id}"><td>${esc(l.game.name)}</td><td class="n">${l.plays}</td>
         <td class="n">${l.comp ? l.wins : l.coop ? `${l.coopWins}<span class="muted small">/${l.coop}</span>` : "—"}</td><td class="n">${l.comp ? rate(l.rate, l.comp) : l.coop ? rate(l.coopRate, l.coop) : "—"}</td>
         <td class="n">${fmtScore(l.best)}</td></tr>`).join("")}</tbody></table>
       <p class="foot muted small">En coopératif et solo, les colonnes indiquent les réussites.</p></section>
-    ${h2h.length ? `<section class="panel"><h2>Face-à-face</h2>
+    ${h2h.length ? `<div class="sec-h"><h2>Face-à-face</h2></div><section class="panel">
       <table class="tbl"><thead><tr><th>Adversaire</th><th class="n">Parties</th><th class="n">Devant</th><th class="n">Derrière</th></tr></thead>
       <tbody>${h2h.map((r) => `<tr data-href="#/players/${r.player_id}"><td>${dot(player(r.player_id))}${pname(r.player_id)}</td><td class="n">${r.plays}</td>
         <td class="n ${r.ahead > r.behind ? "good" : ""}">${r.ahead}</td><td class="n ${r.behind > r.ahead ? "bad" : ""}">${r.behind}</td></tr>`).join("")}</tbody></table>
       ${explain(`<p>Pour chaque adversaire, le bilan de vos parties compétitives communes : combien de fois ${esc(p.name)} a fini <strong>devant</strong> lui (meilleur rang) et combien de fois <strong>derrière</strong>. Les égalités ne sont comptées ni d'un côté ni de l'autre.</p>
         <p>Exemple : dans une partie à 4 où ${esc(p.name)} finit 2e, il est « devant » les 3e et 4e, et « derrière » le 1er.</p>
         <p class="muted">En équipes, les coéquipiers ne s'affrontent pas. Parties d'apprentissage exclues.</p>`)}</section>` : ""}
-    ${elos.length ? `<section class="panel"><h2>Niveau Elo par jeu</h2>
+    ${elos.length ? `<div class="sec-h"><h2>Niveau Elo par jeu</h2></div><section class="panel">
       <table class="tbl"><thead><tr><th>Jeu</th><th class="n">Elo</th><th class="n">Place</th></tr></thead>
       <tbody>${elos.map((e) => `<tr data-href="#/games/${e.game.id}"><td>${esc(e.game.name)}</td><td class="n"><strong class="${e.plays < MIN_SAMPLE ? "thin" : ""}">${fmtNum(Math.round(e.rating))}</strong></td>
         <td class="n">${e.pos}<span class="muted small">/${e.of}</span></td></tr>`).join("")}</tbody></table>
       ${explain(ELO_EXPLAIN, "L'Elo, c'est quoi ?")}</section>` : ""}
-    <section class="panel"><h2>Dernières parties</h2><div class="list">${st.plays.slice(0, 6).map(playCard).join("")}</div></section>`
+    <div class="sec-h"><h2>Dernières parties</h2></div><div class="list">${st.plays.slice(0, 6).map(playCard).join("")}</div>`
     : `<div class="empty"><p class="muted">Aucune partie pour l'instant.</p></div>`}`;
 }
 
@@ -1224,14 +1264,14 @@ function viewMore() {
       <p class="small">Les données sont fictives et restent dans ce navigateur. Elles ne sont partagées avec personne.</p>
       <div class="seg"><button class="${me.role === "admin" ? "on" : ""}" data-action="demo-role" data-v="admin">Vue gestionnaire</button><button class="${me.role === "viewer" ? "on" : ""}" data-action="demo-role" data-v="viewer">Vue joueur</button></div>
       <p class="center"><button class="btn small ghost" data-action="demo-reset">Réinitialiser les données de démo</button></p></section>` : ""}
-    <section class="panel"><h2>Mon compte</h2>
+    <div class="sec-h"><h2>Mon compte</h2></div><section class="panel">
       <form class="form compact" data-form="myname">
         <label class="field"><span>Nom affiché</span><input name="name" value="${esc(me.display_name || "")}" maxlength="60"></label>
         <p class="small muted">${esc(me.email || "")}${me.email ? " · " : ""}${me.owner ? "Propriétaire · " : ""}${me.role === "admin" ? "Gestionnaire" : "Joueur (consultation)"}${me.player_id && player(me.player_id) ? ` · fiche « ${esc(player(me.player_id).name)} »` : ""}</p>
         <div class="form-actions"><button class="btn small" type="submit">Enregistrer</button></div>
       </form></section>
     ${S.store.mode === "icloud" ? viewICloudAccounts(profiles) : ""}
-    ${isAdmin() && S.store.mode !== "icloud" ? `<section class="panel"><h2>Comptes</h2>
+    ${isAdmin() && S.store.mode !== "icloud" ? `<div class="sec-h"><h2>Comptes</h2></div><section class="panel">
       <ul class="accounts">${profiles.map((p) => `<li>
         <div><strong>${esc(p.display_name || p.email)}</strong><div class="muted small">${esc(p.email || "")}</div></div>
         <select data-profile-role="${p.id}" aria-label="Rôle"><option value="admin" ${p.role === "admin" ? "selected" : ""}>Gestionnaire</option><option value="viewer" ${p.role === "viewer" ? "selected" : ""}>Joueur</option></select>
@@ -1248,10 +1288,10 @@ function viewMore() {
         <p class="form-error" id="form-error" role="alert"></p>
         <div class="form-actions"><button class="btn primary" type="submit">${icon("mail", 18)} Envoyer l'invitation</button></div>
       </form></section>` : ""}
-    ${!standalone && S.store.mode !== "icloud" ? `<section class="panel"><h2>Installer sur l'iPhone</h2>
+    ${!standalone && S.store.mode !== "icloud" ? `<div class="sec-h"><h2>Installer sur l'iPhone</h2></div><section class="panel">
       <ol class="small steps"><li>Ouvre cette page dans <strong>Safari</strong>.</li><li>Touche le bouton <strong>Partager</strong> ${icon("share", 16)}.</li>
       <li>Choisis <strong>Sur l'écran d'accueil</strong>, puis <strong>Ajouter</strong>.</li></ol></section>` : ""}
-    <section class="panel"><h2>${icon("download", 18)} Exporter les données</h2>
+    <div class="sec-h"><h2>Exporter les données</h2></div><section class="panel">
       <p class="small muted">Fichiers CSV à enregistrer dans Fichiers, à s'envoyer par e-mail ou à ouvrir dans Numbers ou Excel. Les photos ne sont pas incluses.</p>
       <div class="row-gap">
         <button class="btn small" data-action="export-plays">Parties (tableur)</button>
@@ -1267,7 +1307,7 @@ function viewMore() {
 function viewICloudAccounts(profiles) {
   const me = S.data.me;
   const empty = !S.data.plays.length && !S.data.games.length && !S.data.players.length;
-  return `${isAdmin() ? `<section class="panel"><h2>Membres du groupe</h2>
+  return `${isAdmin() ? `<div class="sec-h"><h2>Membres du groupe</h2></div><section class="panel">
       <ul class="accounts">${profiles.map((p) => `<li>
         <div><strong>${esc(p.display_name)}</strong><div class="muted small">${p.owner ? "Propriétaire" : p.role === "admin" ? "Gestionnaire" : "Joueur"}${p.pending ? " · invitation en attente" : ""}${p.email ? ` · ${esc(p.email)}` : ""}</div></div>
         <select data-profile-player="${p.id}" aria-label="Fiche joueur liée"><option value="">Aucune fiche</option>${S.data.players.map((x) => `<option value="${x.id}" ${x.id === p.player_id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>
@@ -1279,11 +1319,11 @@ function viewICloudAccounts(profiles) {
       <p class="small muted">Joueur : consulte tout. Gestionnaire : saisit, modifie et supprime.</p>
       ${profiles.length > 1 ? `<p class="center"><button class="btn small ghost" data-action="icloud-share">Gérer les membres (droits, retrait)</button></p>` : ""}`
       : `<p class="small muted">Seul le propriétaire du groupe peut inviter ou changer les droits.</p>`}</section>` : ""}
-    ${me.owner && empty ? `<section class="panel"><h2>Importer les anciennes données</h2>
+    ${me.owner && empty ? `<div class="sec-h"><h2>Importer les anciennes données</h2></div><section class="panel">
       <p class="small">Choisis le fichier CSV exporté de Supabase (supabase/export.sql). L'import n'est possible que dans un espace vide.</p>
       <label class="btn block">${icon("download", 18)} Choisir le fichier CSV<input type="file" accept=".csv,text/csv" data-import-csv hidden></label>
       <p class="small muted" id="import-status"></p></section>` : ""}
-    <section class="panel"><h2>${me.owner ? "Supprimer le groupe" : "Quitter le groupe"}</h2>
+    <div class="sec-h"><h2>${me.owner ? "Supprimer le groupe" : "Quitter le groupe"}</h2></div><section class="panel">
       <p class="small">${me.owner ? "Supprime définitivement l'espace C-Party de ton iCloud : toutes les parties, jeux et joueurs, pour tous les membres." : "Tu n'auras plus accès aux parties de ce groupe. Les données du groupe ne sont pas supprimées."}</p>
       <div class="form-actions"><button class="btn danger ghost" data-action="icloud-leave">${me.owner ? "Supprimer le groupe et ses données" : "Quitter le groupe"}</button></div></section>`;
 }
@@ -1322,9 +1362,9 @@ function viewICloudSetup() {
     <button class="btn primary block" data-action="icloud-retry">Réessayer</button></div>`;
   return head + `
     <p class="muted center">Bienvenue ! Pour commencer :</p>
-    <section class="panel"><h2>Tu as reçu une invitation ?</h2>
+    <div class="sec-h"><h2>Tu as reçu une invitation ?</h2></div><section class="panel">
       <p class="small">Touche le lien reçu par Messages ou par e-mail : C-Party s'ouvrira sur les parties de ton groupe.</p></section>
-    <section class="panel"><h2>Tu crées le groupe ?</h2>
+    <div class="sec-h"><h2>Tu crées le groupe ?</h2></div><section class="panel">
       <p class="small">Les données seront rangées dans ton iCloud. Tu pourras ensuite inviter les autres joueurs.</p>
       <button class="btn primary block" data-action="icloud-create">Créer l'espace de mon groupe</button></section>
     <p class="center"><button class="btn small ghost" data-action="icloud-retry">Actualiser</button></p></div>`;
@@ -1334,7 +1374,9 @@ function viewICloudSetup() {
 const formError = (msg) => { const el = $("#form-error"); if (el) el.textContent = msg; else toast(msg, "error"); };
 
 const actions = {
-  period: (el) => { S.ui.period = el.dataset.v; render(); },
+  period: (el) => { S.ui.period = el.dataset.v; const y = window.scrollY; render(); window.scrollTo(0, y); },
+  filters: () => { S.ui.filtersOpen = !S.ui.filtersOpen; const y = window.scrollY; render(); window.scrollTo(0, y); },
+  "filters-reset": () => { Object.assign(S.ui, { period: "all", statPlayers: 0, statKind: "" }); const y = window.scrollY; render(); window.scrollTo(0, y); },
   "game-status": (el) => { S.ui.gameStatus = el.dataset.v; render(); },
   "cover-remove": (el) => {
     S.gameDraft.cover = null; $("#cover-preview").innerHTML = gameThumb(S.gameDraft, 96); el.hidden = true;

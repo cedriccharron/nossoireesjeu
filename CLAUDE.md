@@ -36,6 +36,12 @@ Cédric a choisi de quitter Supabase pour **iCloud (CloudKit)**, sauf le relais 
 - **Méthode suivie** : export Supabase (`supabase/export.sql` → `export/*.csv`, vérifié par
   `supabase/verifier-export.mjs`) puis import dans iCloud. Supabase reste en service jusqu'au feu vert de Cédric.
 
+### Interface « style A » (v1.2.0, 26/11/2026)
+Style iOS sobre choisi par Cédric : couleurs système (fond `#f2f2f7`, bleu `#007aff`, noir en sombre), listes groupées
+sans ombres, titres de section hors des cartes (`.sec-h`), avatars à initiales (`dot()` → `.av`), « + » dans l'en-tête
+(`addBtn`, plus de bouton flottant). Accueil : pastille de filtres repliable, dernière partie, raccourcis, tuiles, top 3,
+activité, carrousel de pochettes ; le tableau complet est sur l'écran `#/ranking`.
+
 ## Fichiers
 | Fichier | Rôle |
 | --- | --- |

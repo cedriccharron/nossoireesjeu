@@ -11,7 +11,7 @@ import {
   eloForGame, headToHead, nemesis, favouriteVictim, ELO_START,
 } from "./stats.js";
 
-const VERSION = "1.1.1 (lot 2)";
+const VERSION = "1.1.2 (lot 2)";
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
@@ -904,7 +904,7 @@ const searchBgg = debounce(async (q) => {
   } catch (e) { box.innerHTML = `<p class="form-error pad">${esc(e.message)}</p>`; }
 }, 450);
 
-function draftFromBgg(t) {
+function draftFromBgg(t, fromFile = false) {
   const baseMatch = (t.base_bgg_ids || []).map((bid) => S.data.games.find((g) => g.bgg_id === bid && !g.base_game_id)).find(Boolean);
   return {
     id: null, name: guessFrenchName(t.bgg_name, t.names), bgg_name: t.bgg_name, bgg_id: t.bgg_id, year: t.year,
@@ -912,7 +912,7 @@ function draftFromBgg(t) {
     mechanics: t.mechanics || [], designers: t.designers || [], publisher: t.publisher, min_players: t.min_players,
     max_players: t.max_players, min_time: t.min_time, max_time: t.max_time, weight: t.weight, status: "owned", lent_to: null,
     default_mode: t.cooperative ? "coop" : t.solo_only ? "solo" : "competitive", score_rule: t.cooperative ? "none" : "high",
-    notes: null, bgg_synced_at: new Date().toISOString(), base_game_id: t.expansion ? baseMatch?.id || "" : null, _isExpansion: !!t.expansion, _names: t.names || [], _baseBggIds: t.base_bgg_ids || [],
+    notes: null, bgg_synced_at: fromFile ? null : new Date().toISOString(), base_game_id: t.expansion ? baseMatch?.id || "" : null, _isExpansion: !!t.expansion, _names: t.names || [], _baseBggIds: t.base_bgg_ids || [],
   };
 }
 
@@ -974,14 +974,20 @@ const isEmpty = (v) => v == null || v === "" || (Array.isArray(v) && !v.length);
 // Fiche incomplète : pas d'image, de nombre de joueurs ou de durée. Une fiche déjà complétée une fois
 // (bgg_synced_at) n'est plus reproposée : BGG n'a alors rien de plus à donner.
 const missingInfo = (g) => !g.bgg_synced_at && ((isEmpty(g.image_url) && isEmpty(g.thumbnail_url)) || isEmpty(g.min_players) || isEmpty(g.min_time));
-function syncPlan(items) {
+// fileThings (import du fichier CSV) : une fiche n'est proposée que si le fichier a de quoi la compléter
+// (le fichier n'a ni image ni mécaniques).
+const fileFills = (g, t) => t && SYNC_FIELDS.some((f) => isEmpty(g[f]) && !isEmpty(t[f]));
+function syncPlan(items, fileThings = null) {
   const byBgg = new Map(S.data.games.filter((g) => g.bgg_id).map((g) => [g.bgg_id, g]));
   const ids = new Set(items.map((i) => i.id));
   const manual = S.data.games.filter((g) => !g.bgg_id);
   const fresh = [], complete = [];
   for (const i of items) {
     const g = byBgg.get(i.id);
-    if (g) { if (missingInfo(g)) complete.push({ game: g, item: i, link: false }); continue; }
+    if (g) {
+      if (fileThings ? fileFills(g, fileThings.get(i.id)) : missingInfo(g)) complete.push({ game: g, item: i, link: false });
+      continue;
+    }
     const m = manual.find((x) => normName(x.name) === normName(i.name) || normName(x.bgg_name) === normName(i.name));
     if (m) { complete.push({ game: m, item: i, link: true }); continue; }
     // Même nom qu'un jeu déjà présent (autre édition BGG ?) : proposé mais décoché par défaut.
@@ -1003,11 +1009,15 @@ function viewImport() {
       <label class="field"><span>Ton pseudo BGG</span><input name="user" value="${esc(im.user)}" required autocapitalize="off" autocomplete="off" data-autofocus></label>
       <p class="hint">${esc(im.progress)}</p>
       <div class="form-actions"><button class="btn primary" type="submit" ${im.step === "loading" ? "disabled" : ""}>${im.step === "loading" ? "Récupération…" : "Récupérer ma collection"}</button></div>
-    </form>`;
+    </form>
+    <section class="panel"><h2>Ou avec le fichier de ta collection</h2>
+      <p class="small">Sur le site BoardGameGeek, ouvre ta collection et exporte-la en CSV (lien « Export »), puis choisis le fichier ici. Pas besoin de connexion à BGG depuis l'app.</p>
+      <label class="btn block">${icon("download", 18)} Choisir le fichier CSV de BGG<input type="file" accept=".csv,text/csv,text/comma-separated-values" data-bgg-csv hidden></label>
+      <p class="small muted">Le fichier ne contient ni pochettes ni mécaniques : seuls l'année, le nombre de joueurs, la durée et la difficulté sont repris.</p></section>`;
   } else if (im.step === "pick") {
-    const { fresh, complete, gone } = syncPlan(im.items);
+    const { fresh, complete, gone } = syncPlan(im.items, im.fileThings);
     const nothing = !fresh.length && !complete.length && !gone.length;
-    body = `<p class="pad">${plural(im.items.length, "jeu possédé", "jeux possédés")} dans la collection BGG de <strong>${esc(im.user)}</strong>.</p>
+    body = `<p class="pad">${plural(im.items.length, "jeu possédé", "jeux possédés")} ${im.fileThings ? `dans le fichier <strong>${esc(im.fileName)}</strong>` : `dans la collection BGG de <strong>${esc(im.user)}</strong>`}.</p>
       ${nothing ? `<div class="empty"><p>${icon("check", 20)} <strong>La ludothèque est à jour.</strong></p><p class="muted">Rien à ajouter ni à compléter.</p>
         <a class="btn" href="#/games">Retour aux jeux</a></div>` : ""}
       ${fresh.length ? `<section class="group"><div class="group-h sync-h"><span>Nouveaux jeux <span class="muted">· ${fresh.length}</span></span>
@@ -1022,7 +1032,7 @@ function viewImport() {
         <p class="pad small muted">Ces jeux ne sont plus marqués « possédés » sur BGG. Rien n'est supprimé : coche ceux à marquer « joué ailleurs » (leurs parties restent).</p>
         <div class="list checks">${gone.map((g) => `<label class="card check-row"><input type="checkbox" data-sync-gone="${g.id}" ${im.sel.gone[g.id] ? "checked" : ""}>
         <span>${esc(g.name)}</span></label>`).join("")}</div></section>` : ""}
-      ${nothing ? "" : `<div class="form-actions sticky"><button class="btn ghost" data-action="imp-restart">Changer de pseudo</button><button class="btn primary" data-action="imp-details">Continuer</button></div>`}`;
+      ${nothing ? "" : `<div class="form-actions sticky"><button class="btn ghost" data-action="imp-restart">${im.fileThings ? "Autre fichier" : "Changer de pseudo"}</button><button class="btn primary" data-action="imp-details">Continuer</button></div>`}`;
   } else if (im.step === "details") {
     body = `<div class="empty"><p>Récupération des fiches BGG…</p><p class="muted">${esc(im.progress)}</p></div>`;
   } else if (im.step === "review") {
@@ -1069,7 +1079,7 @@ async function importFetchCollection(user) {
 
 async function importFetchDetails() {
   const im = S.importer;
-  const plan = syncPlan(im.items);
+  const plan = syncPlan(im.items, im.fileThings);
   const newIds = plan.fresh.filter((i) => i.checked !== false).map((i) => i.id);
   const upd = plan.complete.filter((c) => im.sel.complete[c.game.id] !== false);
   const gone = plan.gone.filter((g) => im.sel.gone[g.id]);
@@ -1078,7 +1088,8 @@ async function importFetchDetails() {
   im.step = "details"; im.details = []; im.updates = []; render();
   try {
     const drafts = new Map();
-    for (let i = 0; i < ids.length; i += 20) {
+    if (im.fileThings) ids.forEach((id) => { const t = im.fileThings.get(id); if (t) drafts.set(id, draftFromBgg(t, true)); });
+    else for (let i = 0; i < ids.length; i += 20) {
       im.progress = `${Math.min(i + 20, ids.length)} / ${ids.length}`;
       const box = $(".empty .muted"); if (box) box.textContent = im.progress;
       const things = await S.store.bgg.things(ids.slice(i, i + 20));
@@ -1093,7 +1104,7 @@ async function importFetchDetails() {
       const patch = {};
       SYNC_FIELDS.forEach((f) => { if (isEmpty(c.game[f]) && !isEmpty(d[f])) patch[f] = d[f]; });
       if (c.link) patch.bgg_id = d.bgg_id;
-      patch.bgg_synced_at = new Date().toISOString(); // ne plus la reproposer ensuite
+      if (!im.fileThings) patch.bgg_synced_at = new Date().toISOString(); // ne plus la reproposer ensuite (le fichier, lui, n'a pas d'images : l'API pourra compléter)
       return { game: c.game, patch };
     }).filter(Boolean);
     // Rattache les extensions : jeu de base déjà présent ou importé en même temps.
@@ -1573,6 +1584,17 @@ document.addEventListener("change", async (e) => {
       toast(list.length > 1 ? `${list.length} photos ajoutées` : "Photo ajoutée");
       await reload();
     } catch (err) { toast(err.message, "error"); await reload(); }
+    return;
+  }
+  if ("bggCsv" in t.dataset && t.files?.[0]) {
+    try {
+      const { readBggCollection } = await import("./bgg-csv.js");
+      const { items, things } = readBggCollection(await t.files[0].text(), S.data.games);
+      if (!items.length) throw new Error("Aucun jeu possédé dans ce fichier.");
+      Object.assign(S.importer, { items, fileThings: new Map(things.map((x) => [x.bgg_id, x])), fileName: t.files[0].name, step: "pick", progress: "" });
+      render();
+    } catch (err) { toast(err.message, "error"); }
+    t.value = "";
     return;
   }
   if ("importCsv" in t.dataset && t.files?.[0]) {

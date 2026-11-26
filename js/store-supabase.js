@@ -55,6 +55,16 @@ export async function createSupabaseStore() {
     },
     async setPassword(password) { must(await sb.auth.updateUser({ password })); },
 
+    // Groupes (v1.3.0) : l'ancien site Supabase n'a qu'un seul groupe.
+    async groups() { return [{ id: "main", name: "C-Party", emoji: "", owner: false, role: "admin", members: 1, current: true }]; },
+    currentGroup: () => "main",
+    async useGroup() {},
+    async createGroup() { throw new Error("Les groupes sont disponibles dans l'app iPhone"); },
+    async saveGroupInfo() { throw new Error("Les groupes sont disponibles dans l'app iPhone"); },
+    async leaveGroup() { throw new Error("Les groupes sont disponibles dans l'app iPhone"); },
+    async readGroup(id) { const d = await this.loadAll(); return { id, name: "C-Party", emoji: "", players: d.players, games: d.games, plays: d.plays, my_player_id: d.me.player_id || null }; },
+    async setMyPlayer(playerId) { const { data: { user } } = await sb.auth.getUser(); must(await sb.from("profiles").update({ player_id: playerId || null }).eq("id", user.id)); },
+
     async loadAll() {
       const { data: { user } } = await sb.auth.getUser();
       const [profiles, players, games, plays] = await Promise.all([
@@ -65,7 +75,7 @@ export async function createSupabaseStore() {
       ]);
       const me = profiles.find((p) => p.id === user.id) || { id: user.id, email: user.email, role: "viewer" };
       return {
-        me, profiles, players, games,
+        group: { id: "main", name: "C-Party", emoji: "", owner: me.role === "admin" }, me, profiles, players, games,
         plays: plays.map(({ play_players, play_expansions, ...p }) => ({
           ...p,
           players: play_players.map((x) => ({ ...x, score: x.score == null ? null : Number(x.score) })),

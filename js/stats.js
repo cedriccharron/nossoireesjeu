@@ -245,3 +245,39 @@ export function eloForGame(plays, gameId) {
     .sort((a, b) => b.rating - a.rating);
   return { ranking, deltas };
 }
+
+// Vue « Moi » (v1.3.0) : mes résultats dans tous mes groupes.
+// groups : [{ id, name, emoji, players, games, plays, my_player_id }]. Les jeux sont reconnus d'un groupe
+// à l'autre par leur numéro BGG (sinon par leur nom) ; une extension compte pour son jeu de base.
+export function myStats(groups) {
+  const norm = (n) => String(n || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const per = [], recent = [], byGame = new Map();
+  for (const gr of groups) {
+    const me = gr.my_player_id;
+    if (!me || !gr.players.some((p) => p.id === me)) { per.push({ group: gr, linked: false, plays: 0, wins: 0, comp: 0, minutes: 0 }); continue; }
+    const games = new Map(gr.games.map((g) => [g.id, g]));
+    const base = (id) => { const g = games.get(id); return g?.base_game_id ? games.get(g.base_game_id) || g : g; };
+    const row = { group: gr, linked: true, plays: 0, wins: 0, comp: 0, minutes: 0 };
+    for (const p of gr.plays) {
+      const x = p.players.find((y) => y.player_id === me);
+      if (!x) continue;
+      row.plays++; row.minutes += p.duration_min || 0;
+      const c = isComp(p);
+      if (c) { row.comp++; if (x.is_winner) row.wins++; }
+      const g = base(p.game_id);
+      const k = g ? (g.bgg_id ? `b${g.bgg_id}` : `n${norm(g.name)}`) : "?";
+      const e = byGame.get(k) || { name: g?.name || "Jeu supprimé", game: g, groupId: gr.id, plays: 0, wins: 0, comp: 0 };
+      e.plays++; if (c) { e.comp++; if (x.is_winner) e.wins++; }
+      byGame.set(k, e);
+      recent.push({ play: p, group: gr, game: g, won: c ? !!x.is_winner : isCoop(p) ? p.coop_result === "win" : null });
+    }
+    per.push(row);
+  }
+  const total = per.reduce((a, x) => ({ plays: a.plays + x.plays, wins: a.wins + x.wins, comp: a.comp + x.comp, minutes: a.minutes + x.minutes }),
+    { plays: 0, wins: 0, comp: 0, minutes: 0 });
+  return {
+    total, groups: per,
+    games: [...byGame.values()].sort((a, b) => b.plays - a.plays || a.name.localeCompare(b.name, "fr")),
+    recent: recent.sort((a, b) => b.play.played_at.localeCompare(a.play.played_at)).slice(0, 8),
+  };
+}

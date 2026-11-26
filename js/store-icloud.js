@@ -9,6 +9,11 @@
 //   History h-<id>        Member m-<identifiant iCloud> (nom affiché, fiche joueur liée)
 //   Photo ph-<uuid> : json = { id, play_id, thumb (vignette JPEG en data URL), … } + champ « image » (CKAsset,
 //   photo complète) que le module natif ne télécharge qu'à la demande (photoFull).
+//   Group group : { name, emoji } — nom du groupe, le même pour tous ses membres.
+//
+// Plusieurs groupes (v1.3.0) : chaque groupe est une zone iCloud partagée. Le groupe ouvert est retenu
+// (localStorage « cparty-group ») et son identifiant est passé à chaque appel du module natif.
+// Un joueur en lecture seule ne peut rien écrire : son « c'est moi » est alors retenu sur l'iPhone.
 import { uuid } from "./util.js";
 import { snapshot } from "./store-demo.js";
 import { CONFIG } from "./config.js";
@@ -26,6 +31,12 @@ export async function createICloudStore() {
   const fullCache = new Map(); // photos complètes déjà téléchargées
   let participants = [];
   const listeners = [];
+  const GROUP_KEY = "cparty-group", ME_KEY = "cparty-me"; // groupe ouvert ; « c'est moi » local par groupe
+  const ls = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch { /* indisponible */ } } };
+  let group = ls.get(GROUP_KEY) || null;
+  const G = (o = {}) => (group ? { ...o, group } : o);
+  const localMe = () => { try { return JSON.parse(ls.get(ME_KEY)) || {}; } catch { return {}; } };
+  const setGroup = (id) => { group = id || null; ls.set(GROUP_KEY, group); db = null; participants = []; fullCache.clear(); };
 
   const clone = (x) => JSON.parse(JSON.stringify(x));
   const nowIso = () => new Date().toISOString();
@@ -44,25 +55,37 @@ export async function createICloudStore() {
   const histRec = (h) => rec("History", `h-${h.id}`, h);
   async function write(save = [], remove = []) {
     for (let i = 0; i < Math.max(save.length, remove.length, 1); i += BATCH)
-      await CS.modify({ save: save.slice(i, i + BATCH), remove: remove.slice(i, i + BATCH) });
+      await CS.modify(G({ save: save.slice(i, i + BATCH), remove: remove.slice(i, i + BATCH) }));
   }
 
+  // Groupe retenu disparu (quitté, supprimé) : on revient au groupe par défaut.
   async function refreshStatus() {
-    st = await CS.status();
+    st = await CS.status(G());
+    if (group && !st.space && st.account === "available") { setGroup(null); st = await CS.status(); }
+    if (st.space?.group && st.space.group !== group) { group = st.space.group; ls.set(GROUP_KEY, group); }
     return st;
   }
-
-  async function fetchAll() {
-    const { records } = await CS.fetchAll();
-    const out = { players: [], games: [], plays: [], history: [], members: [], photos: [] };
+  const parseRecords = (records) => {
+    const out = { players: [], games: [], plays: [], history: [], members: [], photos: [], group: null };
     const key = { Player: "players", Game: "games", Play: "plays", History: "history", Member: "members", Photo: "photos" };
     for (const r of records) {
-      const k = key[r.type];
-      if (!k) continue;
-      try { out[k].push(JSON.parse(r.json)); } catch { /* enregistrement illisible : ignoré */ }
+      try {
+        if (r.type === "Group") { out.group = JSON.parse(r.json); continue; }
+        const k = key[r.type];
+        if (k) out[k].push(JSON.parse(r.json));
+      } catch { /* enregistrement illisible : ignoré */ }
     }
-    db = out;
-    try { participants = (await CS.participants()).participants || []; } catch { participants = []; }
+    return out;
+  };
+  const groupName = (g) => {
+    const j = (() => { try { return JSON.parse(g.json); } catch { return null; } })();
+    return { name: j?.name || (g.title && g.title !== "C-Party" ? g.title : g.owner ? "Mon groupe" : "Groupe partagé"), emoji: j?.emoji || "", named: !!j?.name };
+  };
+
+  async function fetchAll() {
+    const { records } = await CS.fetchAll(G());
+    db = parseRecords(records);
+    try { participants = (await CS.participants(G())).participants || []; } catch { participants = []; }
   }
 
   function profiles() {
@@ -78,7 +101,7 @@ export async function createICloudStore() {
       email: p.email || "",
       display_name: member(p.user).display_name || p.name || (p.owner ? "Propriétaire" : "Invité"),
       role: p.owner || p.permission === "readWrite" ? "admin" : "viewer",
-      player_id: member(p.user).player_id || null,
+      player_id: member(p.user).player_id || (p.user === st.user ? localMe()[group] : null) || null,
       owner: !!p.owner,
       pending: !p.accepted,
     }));
@@ -93,7 +116,8 @@ export async function createICloudStore() {
 
     // ----- Compte et espace -----
     async init() {
-      CS.addListener("spaceChanged", async () => { await refreshStatus(); listeners.forEach((cb) => cb("SPACE_CHANGED")); });
+      // Invitation acceptée : on ouvre directement le groupe rejoint.
+      CS.addListener("spaceChanged", async (e) => { if (e?.group) setGroup(e.group); await refreshStatus(); listeners.forEach((cb) => cb("SPACE_CHANGED")); });
       CS.addListener("sharingError", (e) => listeners.forEach((cb) => cb("SHARING_ERROR", e?.message)));
       await refreshStatus();
       return { session: st.account === "available" && st.space ? { user: { id: st.user } } : null, status: st };
@@ -101,9 +125,46 @@ export async function createICloudStore() {
     onAuth(cb) { listeners.push(cb); },
     status: () => st,
     refreshStatus,
-    async createSpace() { await CS.createSpace(); await refreshStatus(); },
-    async manageSharing() { await CS.manageSharing(); },
-    async leaveSpace() { await CS.leaveSpace(); db = null; await refreshStatus(); },
+    async createSpace() { return store.createGroup({ name: "" }); },
+    async manageSharing() { await CS.manageSharing(G({ title: db?.group?.name || "C-Party" })); },
+    async leaveSpace() { await CS.leaveSpace(G()); setGroup(null); await refreshStatus(); },
+
+    // ----- Groupes (v1.3.0) -----
+    async groups() {
+      const { groups = [] } = await CS.groups();
+      return groups.map((g) => ({ id: g.id, ...groupName(g), owner: !!g.owner, role: g.owner || g.permission === "readWrite" ? "admin" : "viewer",
+        members: g.members || 1, current: g.id === group }));
+    },
+    currentGroup: () => group,
+    async useGroup(id) { setGroup(id); await refreshStatus(); if (!st.space) throw new Error("Ce groupe n'est plus accessible"); },
+    // Crée un groupe dont on est propriétaire, l'ouvre et lui donne son nom.
+    async createGroup({ name, emoji = "" }) {
+      const { group: id } = await CS.createSpace();
+      setGroup(id); await refreshStatus();
+      if (name?.trim()) await write([rec("Group", "group", { name: name.trim(), emoji, updated_at: nowIso() })]);
+      return id;
+    },
+    async saveGroupInfo({ name, emoji }) {
+      requireAdmin();
+      const g = { ...(db?.group || {}), ...(name != null ? { name: name.trim() } : {}), ...(emoji != null ? { emoji } : {}), updated_at: nowIso() };
+      await write([rec("Group", "group", g)]);
+      if (db) db.group = g;
+    },
+    async leaveGroup() { return store.leaveSpace(); },
+    // Données d'un autre groupe, en lecture (vue « Moi », copie de jeux). Rien n'est gardé en mémoire.
+    async readGroup(id) {
+      if (id === group && db) return clone({ id, name: db.group?.name || "", emoji: db.group?.emoji || "", players: db.players, games: db.games, plays: db.plays,
+        my_player_id: db.members.find((m) => m.id === st.user)?.player_id || localMe()[group] || null });
+      const { records } = await CS.fetchAll({ group: id });
+      const d = parseRecords(records);
+      return { id, name: d.group?.name || "", emoji: d.group?.emoji || "", players: d.players, games: d.games, plays: d.plays,
+        my_player_id: d.members.find((m) => m.id === st.user)?.player_id || localMe()[id] || null };
+    },
+    // « C'est moi » : enregistré dans le groupe si on peut écrire, sinon retenu sur cet iPhone.
+    async setMyPlayer(playerId) {
+      const map = localMe(); map[group] = playerId || null; ls.set(ME_KEY, JSON.stringify(map));
+      if (canWrite()) await store.updateProfile(st.user, { player_id: playerId || null });
+    },
     async signIn() {}, async signOut() {}, async resetPassword() {}, async setPassword() {},
 
     async loadAll() {
@@ -114,7 +175,8 @@ export async function createICloudStore() {
         id: st.user, email: "", display_name: "", role: canWrite() ? "admin" : "viewer", player_id: null, owner: !!st.space?.owner,
       };
       me.role = canWrite() ? "admin" : "viewer";
-      return clone({ me, profiles: all, players: db.players, games: db.games, plays: withPhotoCount(db.plays, db.photos) });
+      const groupInfo = { id: group, name: db.group?.name || (st.space?.owner ? "Mon groupe" : "Groupe partagé"), emoji: db.group?.emoji || "", owner: !!st.space?.owner, named: !!db.group?.name };
+      return clone({ group: groupInfo, me, profiles: all, players: db.players, games: db.games, plays: withPhotoCount(db.plays, db.photos) });
     },
 
     // ----- Jeux -----
@@ -230,7 +292,7 @@ export async function createICloudStore() {
     // ----- Photos d'une partie (gardées si la partie est supprimée, pour la restauration) -----
     async photos(playId) { return clone(sortPhotos(db.photos.filter((ph) => ph.play_id === playId))); },
     async photoFull(id) {
-      if (!fullCache.has(id)) fullCache.set(id, "data:image/jpeg;base64," + (await CS.image({ name: `ph-${id}` })).data);
+      if (!fullCache.has(id)) fullCache.set(id, "data:image/jpeg;base64," + (await CS.image(G({ name: `ph-${id}` }))).data);
       return fullCache.get(id);
     },
     // list : [{ full, thumb }] en data URL JPEG (préparées par l'app). Une opération par photo.
@@ -239,7 +301,7 @@ export async function createICloudStore() {
       if (!db.plays.some((p) => p.id === playId)) throw new Error("Partie introuvable");
       for (const { full, thumb } of list) {
         const ph = { id: uuid(), play_id: playId, thumb, created_by: st.user, created_at: nowIso() };
-        await CS.modify({ save: [{ ...rec("Photo", `ph-${ph.id}`, ph), image: full.split(",")[1] }], remove: [] });
+        await CS.modify(G({ save: [{ ...rec("Photo", `ph-${ph.id}`, ph), image: full.split(",")[1] }], remove: [] }));
         db.photos.push(ph); fullCache.set(ph.id, full);
       }
       return list.length;
@@ -263,7 +325,7 @@ export async function createICloudStore() {
       await store.updateProfile(st.user, { display_name: name });
     },
     // role : "viewer" (lecture seule) ou "admin" (modifications autorisées) ; l'autorisation est fixée par l'app.
-    async invite({ role } = {}) { await CS.invite({ role: role === "admin" ? "readWrite" : "readOnly" }); return { ok: true }; },
+    async invite({ role } = {}) { await CS.invite(G({ role: role === "admin" ? "readWrite" : "readOnly", title: db?.group?.name || "C-Party" })); return { ok: true }; },
 
     // ----- Import d'un export Supabase (supabase/export.sql) -----
     async importExport(tables) {

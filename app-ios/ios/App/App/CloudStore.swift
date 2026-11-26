@@ -1,7 +1,9 @@
 // C-Party — stockage iCloud (CloudKit) exposé au JavaScript sous le nom « CloudStore ».
 //
-// Modèle : une zone « CParty » dans la base PRIVÉE du propriétaire, partagée en entier
-// (CKShare de zone). Les invités la voient dans leur base PARTAGÉE.
+// Modèle : un GROUPE = une zone « CParty… » dans la base PRIVÉE de son propriétaire, partagée en entier
+// (CKShare de zone). Les invités la voient dans leur base PARTAGÉE. Une personne peut posséder plusieurs
+// groupes et en rejoindre plusieurs (v1.3.0). Le premier groupe garde le nom de zone historique « CParty ».
+// Identifiant d'un groupe côté JavaScript : « <ownerName>|<zoneName> » (propre à chaque utilisateur).
 // Chaque enregistrement porte un champ « json » : l'objet complet côté JavaScript.
 // Les photos (type « Photo ») ont en plus un champ « image » (CKAsset), lu seulement à la demande.
 // Toute la logique métier reste en JavaScript (js/store-icloud.js) ; ce fichier ne fait que
@@ -32,7 +34,7 @@ final class CloudSpace {
     var sharedDB: CKDatabase { container.sharedCloudDatabase }
 
     /// Prévenu quand l'espace change (invitation acceptée, espace quitté…).
-    var onChange: (() -> Void)?
+    var onChange: ((String?) -> Void)?
 
     struct Active {
         let db: CKDatabase
@@ -40,8 +42,28 @@ final class CloudSpace {
         let isOwner: Bool
     }
 
-    /// Espace actif : celui dont on est propriétaire, sinon le premier espace partagé avec nous.
-    func active() async throws -> Active? {
+    static func isGroupZone(_ z: CKRecordZone.ID) -> Bool { z.zoneName == zoneName || z.zoneName.hasPrefix(zoneName + "-") }
+    static func groupID(_ z: CKRecordZone.ID) -> String { "\(z.ownerName)|\(z.zoneName)" }
+
+    /// Groupe désigné par le JavaScript ; sans identifiant (anciennes versions), le groupe par défaut.
+    func active(_ group: String? = nil) async throws -> Active? {
+        if let g = group, !g.isEmpty {
+            let parts = g.components(separatedBy: "|")
+            guard parts.count == 2 else { return nil }
+            let own = parts[0] == CKCurrentUserDefaultName
+            return Active(db: own ? privateDB : sharedDB, zoneID: CKRecordZone.ID(zoneName: parts[1], ownerName: parts[0]), isOwner: own)
+        }
+        return try await defaultActive()
+    }
+
+    /// Vérifie que le groupe existe encore (zone supprimée ou partage quitté → nil).
+    func exists(_ a: Active) async throws -> Bool {
+        do { _ = try await a.db.recordZone(for: a.zoneID); return true }
+        catch let e as CKError where e.code == .zoneNotFound || e.code == .unknownItem || e.code == .userDeletedZone { return false }
+    }
+
+    /// Groupe par défaut : celui dont on est propriétaire, sinon le premier groupe partagé avec nous.
+    func defaultActive() async throws -> Active? {
         let ownZone = CKRecordZone.ID(zoneName: CloudSpace.zoneName, ownerName: CKCurrentUserDefaultName)
         do {
             _ = try await privateDB.recordZone(for: ownZone)
@@ -50,14 +72,14 @@ final class CloudSpace {
             // pas d'espace à nous : on regarde les espaces partagés
         }
         let zones = try await sharedDB.allRecordZones()
-        if let z = zones.first(where: { $0.zoneID.zoneName == CloudSpace.zoneName }) {
+        if let z = zones.first(where: { CloudSpace.isGroupZone($0.zoneID) }) {
             return Active(db: sharedDB, zoneID: z.zoneID, isOwner: false)
         }
         return nil
     }
 
-    func requireActive() async throws -> Active {
-        guard let a = try await active() else {
+    func requireActive(_ group: String? = nil) async throws -> Active {
+        guard let a = try await active(group) else {
             throw NSError(domain: "CParty", code: 1, userInfo: [NSLocalizedDescriptionKey: "Aucun espace C-Party : crée-le ou accepte une invitation"])
         }
         return a
@@ -72,9 +94,42 @@ final class CloudSpace {
         }
     }
 
-    func createSpace() async throws {
-        let zone = CKRecordZone(zoneName: CloudSpace.zoneName)
+    /// Crée un groupe dont on est propriétaire et renvoie son identifiant.
+    func createSpace() async throws -> String {
+        let mine = try await privateDB.allRecordZones().map(\.zoneID)
+        let name = mine.contains(where: { $0.zoneName == CloudSpace.zoneName })
+            ? CloudSpace.zoneName + "-" + UUID().uuidString.prefix(8).lowercased() : CloudSpace.zoneName
+        let zone = CKRecordZone(zoneName: name)
         _ = try await privateDB.modifyRecordZones(saving: [zone], deleting: [])
+        return CloudSpace.groupID(zone.zoneID)
+    }
+
+    /// Tous mes groupes : possédés (base privée) et rejoints (base partagée), avec nom, droits et nombre de membres.
+    func listGroups() async throws -> [[String: Any]] {
+        var zones: [(Active)] = []
+        for z in try await privateDB.allRecordZones() where CloudSpace.isGroupZone(z.zoneID) {
+            zones.append(Active(db: privateDB, zoneID: z.zoneID, isOwner: true))
+        }
+        for z in try await sharedDB.allRecordZones() where CloudSpace.isGroupZone(z.zoneID) {
+            zones.append(Active(db: sharedDB, zoneID: z.zoneID, isOwner: false))
+        }
+        var out: [[String: Any]] = []
+        for a in zones {
+            let share = try? await zoneShare(a)
+            let gid = CKRecord.ID(recordName: "group", zoneID: a.zoneID)
+            var json = "null"
+            if let res = try? await a.db.records(for: [gid], desiredKeys: ["json"]), case .success(let r)? = res[gid] {
+                json = (r["json"] as? String) ?? "null"
+            }
+            var permission = "readWrite"
+            if !a.isOwner { permission = share?.currentUserParticipant?.permission == .readWrite ? "readWrite" : "readOnly" }
+            out.append([
+                "id": CloudSpace.groupID(a.zoneID), "owner": a.isOwner, "permission": permission, "json": json,
+                "title": (share?[CKShare.SystemFieldKey.title] as? String) ?? "",
+                "members": share?.participants.filter { $0.acceptanceStatus == .accepted }.count ?? 1,
+            ])
+        }
+        return out
     }
 
     func fetchAll(_ a: Active) async throws -> [CKRecord] {
@@ -126,13 +181,21 @@ final class CloudSpace {
         return try Data(contentsOf: url)
     }
 
-    func shareForSharing(_ a: Active) async throws -> CKShare {
-        if let s = try await zoneShare(a) { return s }
+    /// Partage du groupe (créé au besoin) ; le titre affiché dans l'invitation est le nom du groupe.
+    func shareForSharing(_ a: Active, title: String? = nil) async throws -> CKShare {
+        let t = (title?.isEmpty == false ? title! : "C-Party")
+        if let s = try await zoneShare(a) {
+            if a.isOwner, (s[CKShare.SystemFieldKey.title] as? String) != t {
+                s[CKShare.SystemFieldKey.title] = t as CKRecordValue
+                if case .success(let saved as CKShare)? = try? await privateDB.modifyRecords(saving: [s], deleting: []).saveResults.values.first { return saved }
+            }
+            return s
+        }
         guard a.isOwner else {
             throw NSError(domain: "CParty", code: 2, userInfo: [NSLocalizedDescriptionKey: "Seul le propriétaire de l'espace peut inviter"])
         }
         let share = CKShare(recordZoneID: a.zoneID)
-        share[CKShare.SystemFieldKey.title] = "C-Party" as CKRecordValue
+        share[CKShare.SystemFieldKey.title] = t as CKRecordValue
         share.publicPermission = .none
         let res = try await privateDB.modifyRecords(saving: [share], deleting: [])
         if case .success(let saved as CKShare)? = res.saveResults.values.first { return saved }
@@ -145,7 +208,8 @@ final class CloudSpace {
         } catch {
             NSLog("C-Party : invitation non acceptée — \(error)")
         }
-        await MainActor.run { self.onChange?() }
+        let gid = CloudSpace.groupID(metadata.share.recordID.zoneID)
+        await MainActor.run { self.onChange?(gid) }
     }
 
     /// Invité : quitte l'espace partagé. Propriétaire : supprime l'espace et toutes ses données.
@@ -171,12 +235,14 @@ public class CloudStorePlugin: CAPPlugin, CAPBridgedPlugin, UICloudSharingContro
         CAPPluginMethod(name: "manageSharing", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "invite", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "leaveSpace", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "groups", returnType: CAPPluginReturnPromise),
     ]
 
     private let space = CloudSpace.shared
+    private var title = "C-Party"
 
     override public func load() {
-        space.onChange = { [weak self] in self?.notifyListeners("spaceChanged", data: [:]) }
+        space.onChange = { [weak self] gid in self?.notifyListeners("spaceChanged", data: gid.map { ["group": $0] } ?? [:]) }
     }
 
     private func run(_ call: CAPPluginCall, _ work: @escaping () async throws -> [String: Any]) {
@@ -191,23 +257,27 @@ public class CloudStorePlugin: CAPPlugin, CAPBridgedPlugin, UICloudSharingContro
             let st = try await self.space.container.accountStatus()
             guard st == .available else { return ["account": Self.name(st)] }
             let me = try await self.space.container.userRecordID().recordName
-            guard let a = try await self.space.active() else { return ["account": "available", "user": me] }
+            guard let a = try await self.space.active(call.getString("group")), try await self.space.exists(a) else { return ["account": "available", "user": me] }
             var permission = "readWrite"
             if !a.isOwner, let share = try await self.space.zoneShare(a) {
                 permission = share.currentUserParticipant?.permission == .readWrite ? "readWrite" : "readOnly"
             }
             return ["account": "available", "user": me,
-                    "space": ["owner": a.isOwner, "permission": permission]]
+                    "space": ["owner": a.isOwner, "permission": permission, "group": CloudSpace.groupID(a.zoneID)]]
         }
     }
 
     @objc func createSpace(_ call: CAPPluginCall) {
-        run(call) { try await self.space.createSpace(); return [:] }
+        run(call) { ["group": try await self.space.createSpace()] }
+    }
+
+    @objc func groups(_ call: CAPPluginCall) {
+        run(call) { ["groups": try await self.space.listGroups()] }
     }
 
     @objc func fetchAll(_ call: CAPPluginCall) {
         run(call) {
-            let a = try await self.space.requireActive()
+            let a = try await self.space.requireActive(call.getString("group"))
             let recs = try await self.space.fetchAll(a)
             return ["records": recs.map { r -> [String: Any] in
                 ["type": r.recordType, "name": r.recordID.recordName, "json": (r["json"] as? String) ?? "null"]
@@ -223,7 +293,7 @@ public class CloudStorePlugin: CAPPlugin, CAPBridgedPlugin, UICloudSharingContro
         }
         let remove = call.getArray("remove") as? [String] ?? []
         run(call) {
-            let a = try await self.space.requireActive()
+            let a = try await self.space.requireActive(call.getString("group"))
             try await self.space.modify(a, save: save, remove: remove)
             return [:]
         }
@@ -232,7 +302,7 @@ public class CloudStorePlugin: CAPPlugin, CAPBridgedPlugin, UICloudSharingContro
     @objc func image(_ call: CAPPluginCall) {
         let name = call.getString("name") ?? ""
         run(call) {
-            let a = try await self.space.requireActive()
+            let a = try await self.space.requireActive(call.getString("group"))
             return ["data": try await self.space.image(a, name: name).base64EncodedString()]
         }
     }
@@ -259,7 +329,7 @@ public class CloudStorePlugin: CAPPlugin, CAPBridgedPlugin, UICloudSharingContro
 
     @objc func participants(_ call: CAPPluginCall) {
         run(call) {
-            let a = try await self.space.requireActive()
+            let a = try await self.space.requireActive(call.getString("group"))
             guard let share = try await self.space.zoneShare(a) else { return ["participants": []] }
             let me = try await self.space.container.userRecordID().recordName
             let list: [[String: Any]] = share.participants.map { p in
@@ -286,8 +356,9 @@ public class CloudStorePlugin: CAPPlugin, CAPBridgedPlugin, UICloudSharingContro
     @objc func manageSharing(_ call: CAPPluginCall) {
         Task {
             do {
-                let a = try await space.requireActive()
-                let share = try await space.shareForSharing(a)
+                let a = try await space.requireActive(call.getString("group"))
+                let share = try await space.shareForSharing(a, title: call.getString("title"))
+                self.title = call.getString("title") ?? "C-Party"
                 await MainActor.run {
                     let c = UICloudSharingController(share: share, container: self.space.container)
                     c.availablePermissions = [.allowPrivate, .allowReadOnly, .allowReadWrite]
@@ -308,11 +379,12 @@ public class CloudStorePlugin: CAPPlugin, CAPBridgedPlugin, UICloudSharingContro
         let readWrite = call.getString("role") == "readWrite"
         Task {
             do {
-                let a = try await space.requireActive()
+                let a = try await space.requireActive(call.getString("group"))
                 guard a.isOwner else {
                     throw NSError(domain: "CParty", code: 2, userInfo: [NSLocalizedDescriptionKey: "Seul le propriétaire du groupe peut inviter"])
                 }
-                let share = try await space.shareForSharing(a)
+                let share = try await space.shareForSharing(a, title: call.getString("title"))
+                self.title = call.getString("title") ?? "C-Party"
                 await MainActor.run {
                     guard let vc = self.bridge?.viewController else { call.reject("Écran indisponible"); return }
                     let sheet: UIViewController
@@ -340,14 +412,14 @@ public class CloudStorePlugin: CAPPlugin, CAPBridgedPlugin, UICloudSharingContro
 
     @objc func leaveSpace(_ call: CAPPluginCall) {
         run(call) {
-            let a = try await self.space.requireActive()
+            let a = try await self.space.requireActive(call.getString("group"))
             try await self.space.leaveOrDelete(a)
             return [:]
         }
     }
 
     // UICloudSharingControllerDelegate
-    public func itemTitle(for csc: UICloudSharingController) -> String? { "C-Party" }
+    public func itemTitle(for csc: UICloudSharingController) -> String? { title }
     public func cloudSharingController(_ csc: UICloudSharingController, failedToSaveShareWithError error: Error) {
         notifyListeners("sharingError", data: ["message": Self.message(for: error)])
     }

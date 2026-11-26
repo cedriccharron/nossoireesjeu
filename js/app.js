@@ -8,10 +8,10 @@ import {
 } from "./util.js";
 import {
   globalStats, gameStats, playerStats, filterPlays, PERIODS, autoRanks, isComp, MIN_SAMPLE, monthsBack,
-  eloForGame, headToHead, nemesis, favouriteVictim, ELO_START,
+  eloForGame, headToHead, nemesis, favouriteVictim, ELO_START, myStats,
 } from "./stats.js";
 
-const VERSION = "1.2.1";
+const VERSION = "1.3.0 (groupes)";
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
@@ -22,6 +22,8 @@ const S = {
   form: null,       // brouillon de partie en cours
   gameDraft: null,  // brouillon de jeu (ajout / modification)
   importer: null,   // état de l'import de collection
+  groups: null,     // liste de mes groupes (écran Groupes)
+  cross: null,      // données de tous mes groupes (vue « Moi », copie de jeux)
   pendingAuth: null,
 };
 
@@ -138,12 +140,16 @@ function render() {
   try {
     if (!a) html = viewHome();
     else if (a === "ranking") html = viewRanking();
+    else if (a === "groups" && b === "new") html = viewGroupNew();
+    else if (a === "groups") html = viewGroups();
+    else if (a === "me") html = viewMe();
     else if (a === "plays" && b === "new") html = viewPlayForm(null, query);
     else if (a === "plays" && b === "deleted") html = viewDeletedPlays();
     else if (a === "plays" && b && c === "edit") html = viewPlayForm(b, query);
     else if (a === "plays" && b) html = viewPlay(b);
     else if (a === "plays") html = viewPlays();
     else if (a === "games" && b === "new") html = viewGameAdd(query);
+    else if (a === "games" && b === "copy") html = viewGameCopy();
     else if (a === "games" && b === "import") html = viewImport();
     else if (a === "games" && b && c === "edit") html = viewGameForm(b);
     else if (a === "games" && b) html = viewGame(b);
@@ -169,6 +175,8 @@ function afterRender(a, b, c) {
   if (a === "plays" && (b === "new" || c === "edit")) refreshRanks();
   if (a === "plays" && b && b !== "new" && b !== "deleted" && !c) { loadHistory(b); loadPhotos(b); }
   if (a === "plays" && b === "deleted") loadDeleted();
+  if (a === "groups" && !b) loadGroups();
+  if (a === "me" || (a === "games" && b === "copy")) loadCross();
   const focus = $("[data-autofocus]");
   if (focus && !matchMedia("(hover: none)").matches) focus.focus();
 }
@@ -338,10 +346,11 @@ function viewHome() {
   const plays = filteredPlays();
   const st = globalStats(S.data, plays);
   if (!S.data.plays.length) {
-    return header("C-Party") + `<div class="empty">
+    return header("").replace("<h1></h1>", `<h1>${groupTitleBtn()}</h1>`) + groupPrompts() + `<div class="empty">
       <p><strong>Aucune partie pour l'instant.</strong></p>
       ${isAdmin() ? `<p class="muted">Commence par ajouter tes jeux, puis enregistre une première partie.</p>
-        <div class="row-gap"><a class="btn" href="#/games/import">Importer ma collection BGG</a><a class="btn primary" href="#/plays/new">Nouvelle partie</a></div>`
+        <div class="row-gap">${S.store.mode !== "cloud" ? `<a class="btn" href="#/games/copy">Copier des jeux d'un autre groupe</a>` : ""}<a class="btn" href="#/games/import">Importer ma collection BGG</a>
+        <a class="btn" href="#/players/new">Ajouter des joueurs</a><a class="btn primary" href="#/plays/new">Nouvelle partie</a></div>`
         : `<p class="muted">Les parties apparaîtront ici dès qu'un gestionnaire les aura saisies.</p>`}
     </div>` + fab("#/plays/new", "Nouvelle partie");
   }
@@ -349,9 +358,9 @@ function viewHome() {
   const all = playsSorted();
   const last = all[0], lastGame = game(last.game_id);
   const top = sortLeaderboard(st.leaderboard).slice(0, 3);
-  const meBtn = myPlayer ? `<a href="#/players/${myPlayer.id}" aria-label="Ma fiche">${dot(myPlayer, 36).replace('class="av"', 'class="av me-av"')}</a>` : "";
+  const meBtn = `<a href="#/me" aria-label="Moi, tous mes groupes">${myPlayer ? dot(myPlayer, 36).replace('class="av"', 'class="av me-av"') : `<span class="av me-av" style="background:var(--muted)">${icon("person", 18)}</span>`}</a>`;
   const covers = st.topGames.slice(0, 10);
-  return header("C-Party", { above: myPlayer ? `Bonjour ${esc(myPlayer.name)}` : "", actions: meBtn }) + appNotice() + `
+  return header("", { above: myPlayer ? `Bonjour ${esc(myPlayer.name)}` : "", actions: meBtn }).replace("<h1></h1>", `<h1>${groupTitleBtn()}</h1>`) + appNotice() + groupPrompts() + `
     ${filterBar()}
     <a class="last-play" href="#/plays/${last.id}">${gameThumb(lastGame, 56)}
       <div class="lp-body"><div class="lp-k">Dernière partie · ${sinceLabel(last.played_at)}</div>
@@ -400,6 +409,124 @@ function viewRanking() {
           <p class="muted">Valeurs grisées : moins de ${MIN_SAMPLE} parties, peu significatif.</p>`, "Taux et indice : c'est quoi ?")}` : `<p class="muted">Aucune partie sur cette période.</p>`}
       ${st.coop.plays ? `<p class="coopline">Coopératif et solo : <strong>${plural(st.coop.wins, "réussite", "réussites")}</strong> sur ${st.coop.plays} (${fmtPct(st.coop.wins / st.coop.plays)})</p>` : ""}
     </section>`;
+}
+
+// ---------- Groupes (v1.3.0) --------------------------------------------
+// Chaque groupe a ses joueurs, jeux, parties et droits. Une personne peut en avoir plusieurs.
+const GROUP_EMOJIS = ["🏠", "💼", "🍷", "🎲", "🎉", "❤️", "⚽", "🎓", "🌳", "☕"];
+const groupLabel = (g) => `${g?.emoji ? g.emoji + " " : ""}${g?.name || "C-Party"}`;
+const emojiPicker = (cur, name = "emoji") => `<div class="emoji-pick">${GROUP_EMOJIS.map((e) =>
+  `<label><input type="radio" name="${name}" value="${e}" ${e === cur ? "checked" : ""}><span>${e}</span></label>`).join("")}
+  <label><input type="radio" name="${name}" value="" ${!cur ? "checked" : ""}><span class="small muted">Aucun</span></label></div>`;
+
+async function loadGroups() {
+  try { S.groups = await S.store.groups(); } catch (e) { S.groups = []; toast(e.message, "error"); }
+  if (route().parts[0] === "groups") render();
+}
+function viewGroups() {
+  const list = S.groups;
+  return header("Mes groupes", { back: "#/" }) + `
+    <p class="pad small muted">Chaque groupe a ses joueurs, ses jeux, ses parties et ses membres. Touche un groupe pour l'ouvrir.</p>
+    ${!list ? `<div class="loading">Chargement…</div>` : `<div class="list">${list.map((g) => `<button class="card group-row" data-action="group-open" data-id="${esc(g.id)}">
+      <span class="g-emoji">${esc(g.emoji || "🎲")}</span>
+      <span class="g-body"><strong>${esc(g.name)}</strong><span class="muted small">${g.owner ? "Propriétaire" : g.role === "admin" ? "Gestionnaire" : "Joueur"} · ${plural(g.members, "membre", "membres")}</span></span>
+      ${g.current || g.id === S.data.group?.id ? icon("check", 20, "g-cur") : `<span class="chev">›</span>`}</button>`).join("")}</div>`}
+    <div class="quick"><a class="primary" href="#/groups/new">${icon("plus", 18)} Créer un groupe</a></div>
+    <p class="pad small muted">Pour rejoindre le groupe de quelqu'un d'autre, touche le lien d'invitation qu'il t'a envoyé.</p>`;
+}
+function viewGroupNew() {
+  return header("Nouveau groupe", { back: "#/groups" }) + `
+    <form class="form" data-form="group-new">
+      <label class="field"><span>Nom du groupe</span><input name="name" required maxlength="40" placeholder="Famille, Collègues, Club du jeudi…" data-autofocus></label>
+      <fieldset class="field"><legend>Icône</legend>${emojiPicker("🎲")}</fieldset>
+      <p class="hint">Tu seras propriétaire du groupe : tu pourras inviter des joueurs et des gestionnaires, et copier des jeux depuis tes autres groupes.</p>
+      <div class="form-actions"><a class="btn ghost" href="#/groups">Annuler</a><button class="btn primary" type="submit">Créer le groupe</button></div>
+    </form>`;
+}
+// En-tête de l'accueil : le nom du groupe ouvre la liste des groupes.
+const groupTitleBtn = () => `<a class="group-switch" href="#/groups" aria-label="Changer de groupe">${esc(groupLabel(S.data.group))} ${icon("chevronDown", 18)}</a>`;
+
+// Bandeaux de l'accueil : nommer le groupe (propriétaire), dire qui l'on est (tout le monde).
+function groupPrompts() {
+  const g = S.data.group || {};
+  const me = S.data.me;
+  const later = (k) => { try { return localStorage.getItem(`cparty-later-${k}-${g.id}`) === "1"; } catch { return false; } };
+  let out = "";
+  if (S.store.mode === "icloud" && g.owner && !g.named) out += `<section class="panel prompt"><h2>Donne un nom à ton groupe</h2>
+    <p class="small muted">Tu peux maintenant avoir plusieurs groupes (famille, collègues…). Ce nom sera vu par tous les membres et dans les invitations.</p>
+    <form class="form compact" data-form="group-info"><input name="name" maxlength="40" placeholder="Famille" required>${emojiPicker("🏠")}
+    <div class="form-actions"><button class="btn small primary" type="submit">Enregistrer</button></div></form></section>`;
+  if (!me.player_id && activePlayers().length && !later("me")) out += `<section class="panel prompt"><h2>Qui es-tu dans ce groupe ?</h2>
+    <p class="small muted">Choisis ta fiche : tes statistiques de tous tes groupes seront réunies dans « Moi ».</p>
+    <div class="chips wrap">${activePlayers().map((p) => `<button class="chip pchip" data-action="me-player" data-id="${p.id}">${dot(p)}${esc(p.name)}</button>`).join("")}</div>
+    <p class="right"><button class="btn small ghost" data-action="later" data-k="me">Plus tard</button></p></section>`;
+  return out;
+}
+
+// Données de tous mes groupes, chargées à la demande (vue « Moi », copie de jeux).
+async function loadCross(force = false) {
+  if (S.cross && !force && Date.now() - S.cross.at < 60000) return;
+  try {
+    const groups = await S.store.groups();
+    const data = [];
+    for (const g of groups) {
+      try { data.push({ ...(await S.store.readGroup(g.id)), name: g.name, emoji: g.emoji, role: g.role }); }
+      catch { /* groupe inaccessible : ignoré */ }
+    }
+    S.cross = { at: Date.now(), groups: data };
+  } catch (e) { S.cross = { at: Date.now(), groups: [], error: e.message }; }
+  const { parts } = route();
+  if (parts[0] === "me" || (parts[0] === "games" && parts[1] === "copy")) render();
+}
+
+function viewMe() {
+  const myPlayer = S.data.me.player_id && player(S.data.me.player_id);
+  const title = myPlayer ? myPlayer.name : "Moi";
+  if (!S.cross) return header(title, { back: "#/" }) + `<div class="loading">Lecture de tous tes groupes…</div>`;
+  const st = myStats(S.cross.groups);
+  const linked = st.groups.filter((x) => x.linked);
+  return header(title, { back: "#/", above: "Tous mes groupes" }) + `
+    ${!linked.length ? `<div class="empty"><p><strong>Indique qui tu es dans tes groupes.</strong></p><p class="muted">Sur l'accueil de chaque groupe, choisis ta fiche joueur : tes statistiques seront réunies ici.</p></div>` : `
+    <section class="kpis">
+      ${kpi("parties", fmtNum(st.total.plays))}
+      ${kpi("de jeu", fmtHours(st.total.minutes))}
+      ${kpi("victoires", fmtNum(st.total.wins), st.total.comp ? `sur ${st.total.comp} compétitives` : "")}
+      ${kpi("taux de victoire", st.total.comp ? rate(st.total.wins / st.total.comp, st.total.comp) : "—")}
+    </section>`}
+    <div class="sec-h"><h2>Par groupe</h2></div>
+    <div class="list">${st.groups.map((x) => `<button class="card group-row" data-action="group-open" data-id="${esc(x.group.id)}">
+      <span class="g-emoji">${esc(x.group.emoji || "🎲")}</span>
+      <span class="g-body"><strong>${esc(x.group.name)}</strong><span class="muted small">${x.linked
+        ? `${plural(x.plays, "partie", "parties")}${x.comp ? ` · ${x.wins} vict. · ${fmtPct(x.wins / x.comp)}` : ""}`
+        : "Indique qui tu es dans ce groupe"}</span></span><span class="chev">›</span></button>`).join("")}</div>
+    ${st.games.length ? `<div class="sec-h"><h2>Mes jeux</h2></div>
+    <div class="list">${st.games.slice(0, 8).map((e) => `<div class="card game">${gameThumb(e.game, 40)}
+      <span class="g-body"><strong>${esc(e.name)}</strong><span class="muted small">${plural(e.plays, "partie", "parties")}${e.comp ? ` · ${e.wins} vict.` : ""}</span></span></div>`).join("")}</div>` : ""}
+    ${st.recent.length ? `<div class="sec-h"><h2>Mes dernières parties</h2></div>
+    <div class="list">${st.recent.map((r) => `<button class="card play" data-action="group-play" data-group="${esc(r.group.id)}" data-id="${r.play.id}">${gameThumb(r.game, 40)}
+      <span class="g-body"><strong>${esc(r.game?.name || "Jeu supprimé")}</strong><span class="muted small">${esc(r.group.emoji || "")} ${esc(r.group.name)} · ${fmtShort(r.play.played_at)}</span></span>
+      ${r.won === true ? icon("trophy", 18, "tr") : r.won === false ? `<span class="muted small">—</span>` : ""}</button>`).join("")}</div>` : ""}
+    <p class="center small muted" style="margin-top:16px">Visible par toi seul. Tes statistiques détaillées par jeu restent dans chaque groupe.</p>`;
+}
+
+// Copier des jeux depuis un autre groupe (fiche + pochette, sans les parties).
+function viewGameCopy() {
+  if (!isAdmin()) return notFound();
+  if (!S.cross) return header("Depuis un autre groupe", { back: "#/games/new" }) + `<div class="loading">Lecture de tes autres groupes…</div>`;
+  const norm = (n) => String(n || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const have = new Set(S.data.games.flatMap((g) => [g.bgg_id ? `b${g.bgg_id}` : null, `n${norm(g.name)}`]).filter(Boolean));
+  const others = S.cross.groups.filter((g) => g.id !== S.data.group?.id);
+  const sel = (S.copySel ||= {});
+  const rows = others.map((gr) => ({ gr, games: gr.games.filter((g) => !g.base_game_id && !have.has(g.bgg_id ? `b${g.bgg_id}` : `n${norm(g.name)}`))
+    .sort((a, b) => a.name.localeCompare(b.name, "fr")) })).filter((x) => x.games.length);
+  return header("Depuis un autre groupe", { back: "#/games/new", sub: `vers ${esc(groupLabel(S.data.group))}` }) + `
+    ${!others.length ? `<div class="empty"><p>Tu n'as pas d'autre groupe.</p></div>` : !rows.length ? `<div class="empty"><p>${icon("check", 20)} Tous les jeux de tes autres groupes sont déjà ici.</p></div>` : `
+    <p class="pad small muted">La fiche, la pochette et les extensions sont copiées ; les parties restent dans leur groupe.</p>
+    ${rows.map(({ gr, games }) => `<div class="sec-h"><h2>${esc(groupLabel(gr))}</h2></div>
+      <div class="list checks">${games.map((g) => { const k = `${gr.id}::${g.id}`; const ex = gr.games.filter((e) => e.base_game_id === g.id).length;
+        return `<label class="card check-row"><input type="checkbox" data-copy="${esc(k)}" ${sel[k] ? "checked" : ""}>${gameThumb(g, 36)}
+        <span>${esc(g.name)}${ex ? `<span class="muted small"> · ${plural(ex, "extension", "extensions")}</span>` : ""}</span></label>`; }).join("")}</div>`).join("")}
+    <div class="form-actions sticky"><button class="btn primary" data-action="copy-games">Copier la sélection</button></div>`}`;
 }
 
 // ---------- Parties : liste --------------------------------------------
@@ -925,6 +1052,7 @@ function viewGameAdd(query) {
     <div class="search">${icon("search", 18)}<input type="search" id="bgg-q" placeholder="Nom du jeu sur BoardGameGeek" data-autofocus aria-label="Rechercher sur BoardGameGeek"></div>
     <div id="bgg-results" class="list"></div>
     <p class="center small"><button class="linkish" data-action="game-manual">Jeu absent de BGG ? Saisie manuelle</button></p>
+    ${S.store.mode !== "cloud" ? `<p class="center small"><a href="#/games/copy">Copier depuis un autre groupe</a></p>` : ""}
     ${S.store.mode === "demo" ? `<p class="center small muted">Mode démo : recherche dans un petit catalogue fictif (essaie « Pandémie », « Wingspan »).</p>` : ""}`;
 }
 
@@ -1267,6 +1395,15 @@ function viewMore() {
       <p class="small">Les données sont fictives et restent dans ce navigateur. Elles ne sont partagées avec personne.</p>
       <div class="seg"><button class="${me.role === "admin" ? "on" : ""}" data-action="demo-role" data-v="admin">Vue gestionnaire</button><button class="${me.role === "viewer" ? "on" : ""}" data-action="demo-role" data-v="viewer">Vue joueur</button></div>
       <p class="center"><button class="btn small ghost" data-action="demo-reset">Réinitialiser les données de démo</button></p></section>` : ""}
+    <div class="sec-h"><h2>Groupe</h2><a href="#/groups">Changer ›</a></div><section class="panel">
+      ${isAdmin() && S.store.mode !== "cloud" ? `<form class="form compact" data-form="group-info">
+        <label class="field"><span>Nom du groupe</span><input name="name" value="${esc(S.data.group?.name || "")}" maxlength="40" required></label>
+        ${emojiPicker(S.data.group?.emoji || "")}
+        <div class="form-actions"><button class="btn small" type="submit">Enregistrer</button></div></form>`
+        : `<p><strong>${esc(groupLabel(S.data.group))}</strong></p>`}
+      ${isAdmin() && S.store.mode !== "cloud" ? `<p class="small"><a href="#/games/copy">${icon("download", 15)} Copier des jeux depuis un autre groupe</a></p>` : ""}
+      ${S.store.mode === "demo" ? `<p class="small muted">Démo : 3 groupes fictifs (Famille, Collègues, Belle-famille). <button class="linkish" data-action="demo-leave">Retirer ce groupe</button></p>` : ""}
+    </section>
     <div class="sec-h"><h2>Mon compte</h2></div><section class="panel">
       <form class="form compact" data-form="myname">
         <label class="field"><span>Nom affiché</span><input name="name" value="${esc(me.display_name || "")}" maxlength="60"></label>
@@ -1326,7 +1463,7 @@ function viewICloudAccounts(profiles) {
       <p class="small">Choisis le fichier CSV exporté de Supabase (supabase/export.sql). L'import n'est possible que dans un espace vide.</p>
       <label class="btn block">${icon("download", 18)} Choisir le fichier CSV<input type="file" accept=".csv,text/csv" data-import-csv hidden></label>
       <p class="small muted" id="import-status"></p></section>` : ""}
-    <div class="sec-h"><h2>${me.owner ? "Supprimer le groupe" : "Quitter le groupe"}</h2></div><section class="panel">
+    <div class="sec-h"><h2>${me.owner ? "Supprimer ce groupe" : "Quitter ce groupe"}</h2></div><section class="panel">
       <p class="small">${me.owner ? "Supprime définitivement l'espace C-Party de ton iCloud : toutes les parties, jeux et joueurs, pour tous les membres." : "Tu n'auras plus accès aux parties de ce groupe. Les données du groupe ne sont pas supprimées."}</p>
       <div class="form-actions"><button class="btn danger ghost" data-action="icloud-leave">${me.owner ? "Supprimer le groupe et ses données" : "Quitter le groupe"}</button></div></section>`;
 }
@@ -1558,14 +1695,63 @@ const actions = {
   },
   "icloud-invite": async (el) => { try { await S.store.invite({ role: el.dataset.role }); } catch (e) { toast(e.message, "error"); } },
   "icloud-share": async () => { try { await S.store.manageSharing(); } catch (e) { toast(e.message, "error"); } },
+  // ----- Groupes -----
+  "group-open": async (el) => {
+    const id = el.dataset.id;
+    if (id === S.data.group?.id && route().parts[0] === "groups") return go("#/");
+    try { await S.store.useGroup(id); S.form = null; S.importer = null; S.ui.filtersOpen = false; await reload(); go("#/"); }
+    catch (e) { toast(e.message, "error"); S.groups = null; loadGroups(); }
+  },
+  "group-play": async (el) => {
+    try { if (el.dataset.group !== S.data.group?.id) { await S.store.useGroup(el.dataset.group); await reload(); } go(`#/plays/${el.dataset.id}`); }
+    catch (e) { toast(e.message, "error"); }
+  },
+  "me-player": async (el) => {
+    try { await S.store.setMyPlayer(el.dataset.id); S.cross = null; toast(`C'est noté : tu es ${player(el.dataset.id)?.name || ""}`); await reload(); }
+    catch (e) { toast(e.message, "error"); }
+  },
+  later: (el) => { try { localStorage.setItem(`cparty-later-${el.dataset.k}-${S.data.group?.id}`, "1"); } catch { /* indisponible */ } render(); },
+  "demo-leave": async () => {
+    if (!(await confirmDialog(`Retirer le groupe « ${S.data.group?.name} » de la démo ?`, "Retirer"))) return;
+    try { await S.store.leaveGroup(); S.cross = null; await reload(); go("#/"); } catch (e) { toast(e.message, "error"); }
+  },
+  "copy-games": async (el) => {
+    const keys = Object.entries(S.copySel || {}).filter(([, v]) => v).map(([k]) => k);
+    if (!keys.length) return toast("Rien de coché.");
+    el.disabled = true;
+    try {
+      const clean = (g) => { const { id, created_at, updated_at, base_game_id, ...rest } = g; return rest; };
+      const bases = [], exps = [];
+      for (const k of keys) {
+        const [gid, id] = k.split("::");
+        const gr = S.cross.groups.find((x) => x.id === gid);
+        const g = gr?.games.find((x) => x.id === id);
+        if (!g) continue;
+        const dk = g.bgg_id ? `b${g.bgg_id}` : `n${g.name.toLowerCase()}`;
+        if (!g || bases.some((b) => (b.bgg_id ? `b${b.bgg_id}` : `n${b.name.toLowerCase()}`) === dk)) continue; // même jeu coché dans deux groupes
+        gr.games.filter((e) => e.base_game_id === g.id).forEach((e) => exps.push({ ...clean(e), _base: g }));
+      }
+      const saved = await S.store.saveGames(bases.map((g) => ({ ...g, base_game_id: null })));
+      const byName = new Map(saved.map((g) => [g.name, g.id]));
+      const ex = exps.map(({ _base, ...e }) => ({ ...e, base_game_id: byName.get(_base.name) })).filter((e) => e.base_game_id);
+      if (ex.length) await S.store.saveGames(ex);
+      S.copySel = {}; S.cross = null;
+      toast(`${plural(saved.length + ex.length, "jeu copié", "jeux copiés")}`);
+      await reload(); go("#/games");
+    } catch (e) { el.disabled = false; toast(e.message, "error"); }
+  },
   "icloud-leave": async () => {
     const owner = S.data.me.owner;
     const ok = await confirmDialog(owner
-      ? "Supprimer le groupe ? Toutes les parties, jeux et joueurs seront effacés de ton iCloud, pour tous les membres. C'est définitif."
-      : "Quitter le groupe ? Tu pourras revenir seulement avec une nouvelle invitation.",
+      ? `Supprimer le groupe « ${S.data.group?.name || "C-Party"} » ? Toutes ses parties, jeux et joueurs seront effacés de ton iCloud, pour tous les membres. Tes autres groupes ne sont pas touchés. C'est définitif.`
+      : `Quitter le groupe « ${S.data.group?.name || "C-Party"} » ? Tu pourras revenir seulement avec une nouvelle invitation.`,
       owner ? "Supprimer définitivement" : "Quitter");
     if (!ok) return;
-    try { await S.store.leaveSpace(); S.data = null; go("#/"); render(); toast(owner ? "Groupe supprimé" : "Tu as quitté le groupe"); } catch (e) { toast(e.message, "error"); }
+    try {
+      await S.store.leaveSpace(); S.cross = null; S.groups = null; go("#/");
+      if (S.store.status()?.space) await reload(); else { S.data = null; render(); }
+      toast(owner ? "Groupe supprimé" : "Tu as quitté le groupe");
+    } catch (e) { toast(e.message, "error"); }
   },
   logout: async () => { await S.store.signOut(); S.data = null; render(); },
   forgot: async () => {
@@ -1609,6 +1795,7 @@ document.addEventListener("change", async (e) => {
   if (t.dataset.imp) { const it = S.importer.items.find((i) => String(i.id) === t.dataset.imp); if (it) it.checked = t.checked; return; }
   if (t.dataset.syncComplete) { S.importer.sel.complete[t.dataset.syncComplete] = t.checked; return; }
   if (t.dataset.syncGone) { S.importer.sel.gone[t.dataset.syncGone] = t.checked; return; }
+  if (t.dataset.copy) { (S.copySel ||= {})[t.dataset.copy] = t.checked; return; }
   if ("statKind" in t.dataset) { S.ui.statKind = t.value; const y = window.scrollY; render(); window.scrollTo(0, y); return; }
   if (t.dataset.actionChange === "status") { $("#lent-field").hidden = t.value !== "lent"; return; }
   if ("cover" in t.dataset && t.files?.[0] && S.gameDraft) {
@@ -1754,6 +1941,17 @@ document.addEventListener("submit", async (e) => {
     } else if (kind === "import-user") {
       if (!fd.user?.trim()) throw new Error("Indique ton pseudo BGG.");
       await importFetchCollection(fd.user);
+    } else if (kind === "group-new") {
+      if (!fd.name?.trim()) throw new Error("Donne un nom au groupe.");
+      await S.store.createGroup({ name: fd.name.trim(), emoji: fd.emoji || "" });
+      S.groups = null; S.cross = null;
+      await reload(); go("#/more");
+      toast(`Groupe « ${fd.name.trim()} » créé : invite ses membres`);
+    } else if (kind === "group-info") {
+      if (!fd.name?.trim()) throw new Error("Donne un nom au groupe.");
+      await S.store.saveGroupInfo({ name: fd.name.trim(), emoji: fd.emoji ?? "" });
+      S.groups = null; S.cross = null;
+      toast("Groupe mis à jour"); await reload();
     } else if (kind === "myname") {
       await S.store.updateMyName((fd.name || "").trim());
       toast("Nom mis à jour");

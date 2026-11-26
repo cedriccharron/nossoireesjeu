@@ -495,3 +495,25 @@ input, select, textarea { border: .5px solid var(--line); }
 .form .photos > label { white-space: nowrap; grid-column: span 2; justify-self: start; }
 .panel.demo-panel { background: var(--accent-soft); }
 .prow input, .prow select, .team-row input { background: var(--surface-2); border-color: transparent; }
+
+/* ===================== Groupes (v1.3.0) ===================== */
+.group-switch { color: var(--ink); display: inline-flex; align-items: center; gap: 4px; max-width: 100%; }
+.group-switch .ic { color: var(--accent); flex: none; }
+.top h1 .group-switch { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-row { gap: 12px; cursor: pointer; }
+.g-emoji { width: 40px; height: 40px; border-radius: 10px; background: var(--surface-2); display: grid; place-items: center; font-size: 22px; flex: none; }
+.g-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.g-body strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.g-cur { color: var(--accent); }
+.list > .card.group-row + .card.group-row::before { left: 66px; }
+.emoji-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+.emoji-pick label { position: relative; }
+.emoji-pick input { position: absolute; opacity: 0; }
+.emoji-pick span { display: grid; place-items: center; min-width: 40px; height: 40px; padding: 0 6px; border-radius: 10px; background: var(--surface-2); font-size: 20px; cursor: pointer; }
+.emoji-pick input:checked + span { background: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent); }
+.emoji-pick input:focus-visible + span { outline: 2px solid var(--accent); }
+.panel.prompt { background: var(--accent-soft); }
+.panel.prompt h2 { margin-bottom: 4px; }
+.panel.prompt input[name="name"] { margin-bottom: 8px; }
+.right { text-align: right; margin: 6px 0 0; }
+.sec-h a { white-space: nowrap; }

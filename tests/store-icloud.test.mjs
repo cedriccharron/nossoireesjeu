@@ -3,23 +3,38 @@
 
 import { readFileSync } from "node:fs";
 // Faux module natif : un iCloud en mémoire, avec écritures atomiques et droits.
-const cloud = new Map(); let calls = 0; let permission = "readWrite", owner = true, space = true;
-let lastInvite = null;
+// Plusieurs groupes (v1.3.0) : une Map d'enregistrements par groupe ; « cloud » = le groupe par défaut.
+const zones = new Map([["__defaultOwner__|CParty", new Map()]]);
+const cloud = zones.get("__defaultOwner__|CParty");
+const zoneOf = (o) => zones.get(o?.group || "__defaultOwner__|CParty") || (() => { throw new Error("L'espace C-Party n'existe plus"); })();
+let calls = 0; let permission = "readWrite", owner = true, space = true;
+let lastInvite = null, lastTitle = null;
 let participantsList = [{ user: "_moi", name: "Cédric", owner: true, permission: "readWrite", accepted: true }, { user: "_ami", name: "Léa", owner: false, permission: "readOnly", accepted: false }];
-globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
+const mem = new Map();
+globalThis.localStorage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
 globalThis.window = { Capacitor: { isNativePlatform: () => true, Plugins: { CloudStore: {
   addListener() {},
-  async status() { return { account: "available", user: "_moi", space: space ? { owner, permission } : undefined }; },
-  async createSpace() { space = true; },
-  async fetchAll() { return { records: [...cloud.values()].map(({ image, ...r }) => r) }; }, // l'image n'est pas téléchargée
-  async modify({ save, remove }) {
-    calls++;
-    if (!owner && permission !== "readWrite") throw new Error("Tu n'as pas le droit de modifier ces données");
-    if (save.length > 400 || remove.length > 400) throw new Error("trop d'enregistrements");
-    save.forEach((r) => cloud.set(r.name, r)); remove.forEach((n) => cloud.delete(n));
+  async status(o) {
+    const g = o?.group || "__defaultOwner__|CParty";
+    if (!zones.has(g) || !space) return { account: "available", user: "_moi" };
+    const own = g.startsWith("__defaultOwner__|");
+    return { account: "available", user: "_moi", space: { owner: own && owner, permission: own ? permission : "readOnly", group: g } };
   },
-  async invite({ role }) { lastInvite = role; },
-  async image({ name }) { const r = cloud.get(name); if (!r?.image) throw new Error("Photo introuvable"); return { data: r.image }; },
+  async createSpace() { space = true; const id = `__defaultOwner__|CParty-${zones.size}`; zones.set(id, new Map()); return { group: id }; },
+  async groups() { return { groups: [...zones.keys()].map((id) => ({ id, owner: id.startsWith("__defaultOwner__|"), permission: id.startsWith("__defaultOwner__|") ? "readWrite" : "readOnly",
+    json: zones.get(id).get("group")?.json || "null", title: "C-Party", members: 1 })) }; },
+  async fetchAll(o) { return { records: [...zoneOf(o).values()].map(({ image, ...r }) => r) }; }, // l'image n'est pas téléchargée
+  async modify(o) {
+    const { save, remove } = o;
+    calls++;
+    const own = !o.group || o.group.startsWith("__defaultOwner__|");
+    if (!own || (!owner && permission !== "readWrite")) throw new Error("Tu n'as pas le droit de modifier ces données");
+    if (save.length > 400 || remove.length > 400) throw new Error("trop d'enregistrements");
+    const z = zoneOf(o);
+    save.forEach((r) => z.set(r.name, r)); remove.forEach((n) => z.delete(n));
+  },
+  async invite({ role, title }) { lastInvite = role; lastTitle = title; },
+  async image(o) { const r = zoneOf(o).get(o.name); if (!r?.image) throw new Error("Photo introuvable"); return { data: r.image }; },
   async participants() { return { participants: participantsList }; },
 }}}};
 const { createICloudStore, tablesFromExport, icloudAvailable } = await import("../js/store-icloud.js");
@@ -118,4 +133,41 @@ const norm = (x) => JSON.stringify([...x].map(({ photo_count, ...p }) => p).sort
 ok(norm(after.plays) === norm(before.plays) && after.games.length === before.games.length && after.players.length === before.players.length,
   "sauvegarde réimportée à l'identique (" + after.plays.length + " parties)");
 ok((await s3.history(before.plays[0].id)).length === (await s2.history(before.plays[0].id)).length, "historique réimporté");
+
+// ----- Plusieurs groupes (v1.3.0) -----
+const s4 = await createICloudStore(); await s4.init();
+let gl = await s4.groups();
+ok(gl.length === 1 && gl[0].name === "Mon groupe" && gl[0].owner, "groupe existant listé, nom par défaut : " + gl[0].name);
+await s4.saveGroupInfo({ name: "Famille", emoji: "🏠" });
+d = await s4.loadAll();
+ok(d.group.name === "Famille" && d.group.emoji === "🏠" && d.group.named, "groupe nommé (enregistrement Group)");
+await s4.invite({ role: "viewer" }); ok(lastTitle === "Famille", "l'invitation porte le nom du groupe");
+const famGames = d.games.length, famPlayer = d.players[0];
+await s4.setMyPlayer(famPlayer.id);
+const id2 = await s4.createGroup({ name: "Collègues", emoji: "💼" });
+d = await s4.loadAll();
+ok(s4.currentGroup() === id2 && d.group.name === "Collègues" && d.games.length === 0 && d.plays.length === 0, "nouveau groupe ouvert, vide");
+const me2 = (await s4.savePlayer({ name: "Moi au bureau", color: "#000" })).id;
+await s4.saveGames([{ name: "Azul", bgg_id: 230802 }]);
+await s4.setMyPlayer(me2);
+gl = await s4.groups();
+ok(gl.length === 2 && gl.find((g) => g.id === id2).current && gl.some((g) => g.name === "Famille"), "deux groupes listés, le nouveau est ouvert");
+const other = await s4.readGroup("__defaultOwner__|CParty");
+ok(other.name === "Famille" && other.games.length === famGames && other.my_player_id === famPlayer.id, "lecture d'un autre groupe sans le quitter, avec « c'est moi »");
+await s4.useGroup("__defaultOwner__|CParty"); d = await s4.loadAll();
+ok(d.group.name === "Famille" && !d.games.some((g) => g.name === "Azul" && g.bgg_id === 230802 && !famGames), "retour au premier groupe, données séparées");
+const s5 = await createICloudStore(); await s5.init(); d = await s5.loadAll();
+ok(d.group.name === "Famille", "le groupe ouvert est retenu au redémarrage");
+// Groupe rejoint en lecture seule : « c'est moi » gardé sur l'iPhone
+zones.set("_ami|CParty", new Map([["p1", { type: "Player", name: "p1", json: JSON.stringify({ id: "p1", name: "Moi chez Léa" }) }]]));
+await s5.useGroup("_ami|CParty"); d = await s5.loadAll();
+ok(d.me.role === "viewer", "groupe rejoint : joueur");
+await s5.setMyPlayer("p1"); d = await s5.loadAll();
+ok(d.me.player_id === "p1", "joueur : « c'est moi » retenu localement");
+err = null; try { await s5.saveGroupInfo({ name: "Pirate" }); } catch (e) { err = e.message; }
+ok(err === "Action réservée aux gestionnaires", "joueur : ne peut pas renommer le groupe");
+// Groupe supprimé ailleurs : retour au groupe par défaut
+zones.delete("_ami|CParty");
+const s6 = await createICloudStore(); await s6.init();
+ok(s6.currentGroup() === "__defaultOwner__|CParty", "groupe disparu : retour au groupe par défaut");
 console.log("\nTous les tests passent.");

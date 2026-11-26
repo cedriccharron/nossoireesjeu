@@ -5,6 +5,7 @@ import { uuid, PLAYER_COLORS, guessFrenchName } from "./util.js";
 const KEY = "nsj-demo-v1";
 const PHOTO_KEY = "nsj-demo-photos-v1"; // photos de la démo, à part (elles sont lourdes)
 const ME = "demo-user";
+const GROUPS_KEY = "nsj-demo-groups-v1"; // plusieurs groupes (v1.3.0) : chacun a ses données sous sa propre clé
 
 // Catalogue fictif pour simuler la recherche BGG en mode démo.
 const CATALOG = [
@@ -102,6 +103,35 @@ function seed() {
   };
 }
 
+// Groupes de démonstration supplémentaires : quelques joueurs et parties compétitives.
+function seedSmall({ names, catalog, n, seedNum, myIndex = 0, viewAs = "admin" }) {
+  const r = rng(seedNum);
+  const players = names.map((name, i) => ({ id: uuid(), name, color: PLAYER_COLORS[(i + 2) % PLAYER_COLORS.length], archived: false, created_at: new Date().toISOString() }));
+  const games = catalog.map((i) => fromCatalog(CATALOG[i]));
+  const plays = [], history = [];
+  for (let i = 0; i < n; i++) {
+    const d = new Date(Date.now() - Math.floor(r() * 300) * 864e5).toISOString().slice(0, 10);
+    const game = games[Math.floor(r() * games.length)];
+    const ps = [...players].sort(() => r() - 0.5).slice(0, Math.max(2, Math.min(players.length, (game.max_players || 4))));
+    const scored = ps.map((p) => ({ p, s: Math.round(40 + r() * 60) })).sort((a, b) => b.s - a.s);
+    const pp = scored.map((x) => ({ player_id: x.p.id, score: x.s, rank: 1 + scored.filter((y) => y.s > x.s).length, team: null, is_winner: false }));
+    pp.forEach((x) => (x.is_winner = x.rank === 1));
+    const play = { id: uuid(), game_id: game.id, played_at: d, mode: "competitive", coop_result: null, is_learning: false,
+      duration_min: game.min_time || null, location: null, notes: null, created_by: ME, created_at: `${d}T21:30:00Z`, updated_at: `${d}T21:30:00Z`, players: pp, expansions: [] };
+    plays.push(play);
+    history.push({ id: history.length + 1, play_id: play.id, action: "create", actor: ME, at: play.created_at, before: null, after: snapshot(play) });
+  }
+  return { profiles: [{ id: ME, email: "demo@nossoireesjeu.app", display_name: "Vous (démo)", role: viewAs, player_id: players[myIndex].id }],
+    players, games, plays, history, viewAs };
+}
+const DEMO_GROUPS = [
+  { id: "famille", name: "Famille", emoji: "🏠", owner: true },
+  { id: "collegues", name: "Collègues", emoji: "💼", owner: false, members: 4 },
+  { id: "belle-famille", name: "Belle-famille", emoji: "🍷", owner: false, members: 3 },
+];
+const emptyGroup = () => ({ profiles: [{ id: ME, email: "demo@nossoireesjeu.app", display_name: "Vous (démo)", role: "admin", player_id: null }],
+  players: [], games: [], plays: [], history: [], viewAs: "admin" });
+
 function snapshot(p) {
   return {
     game_id: p.game_id, played_at: p.played_at, mode: p.mode, coop_result: p.coop_result,
@@ -114,11 +144,23 @@ function snapshot(p) {
 
 export function createDemoStore() {
   let db;
-  const load = () => {
-    try { db = JSON.parse(localStorage.getItem(KEY)); } catch { db = null; }
-    if (!db) { db = seed(); save(); }
+  // Registre des groupes : { current, list: [{ id, name, emoji, owner, members }] }. Le groupe « famille » garde la clé historique.
+  const readReg = () => { try { return JSON.parse(localStorage.getItem(GROUPS_KEY)); } catch { return null; } };
+  let reg = readReg() || { current: "famille", list: DEMO_GROUPS.map((g) => ({ ...g })) };
+  const saveReg = () => { try { localStorage.setItem(GROUPS_KEY, JSON.stringify(reg)); } catch { /* stockage indisponible */ } };
+  const keyOf = (id) => (id === "famille" ? KEY : `${KEY}-${id}`);
+  const seedFor = (id) => id === "famille" ? seed()
+    : id === "collegues" ? seedSmall({ names: ["Alex", "Inès", "Hugo", "Zoé"], catalog: [0, 3, 8], n: 14, seedNum: 7 })
+    : id === "belle-famille" ? seedSmall({ names: ["Alex", "Jeanne", "Paul"], catalog: [2, 8], n: 8, seedNum: 11, viewAs: "viewer" })
+    : emptyGroup();
+  const readDb = (id) => {
+    let d; try { d = JSON.parse(localStorage.getItem(keyOf(id))); } catch { d = null; }
+    if (!d) { d = seedFor(id); try { localStorage.setItem(keyOf(id), JSON.stringify(d)); } catch { /* stockage indisponible */ } }
+    return d;
   };
-  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch { /* stockage indisponible */ } };
+  const load = () => { db = readDb(reg.current); };
+  const save = () => { try { localStorage.setItem(keyOf(reg.current), JSON.stringify(db)); } catch { /* stockage indisponible */ } };
+  const groupInfo = () => { const g = reg.list.find((x) => x.id === reg.current) || reg.list[0]; return { id: g.id, name: g.name, emoji: g.emoji || "", owner: !!g.owner }; };
   const clone = (x) => JSON.parse(JSON.stringify(x));
   const requireAdmin = () => { if (db.viewAs !== "admin") throw new Error("Action réservée aux gestionnaires"); };
   const delay = (v) => new Promise((ok) => setTimeout(() => ok(v), 120));
@@ -138,13 +180,53 @@ export function createDemoStore() {
       load();
       const me = { ...db.profiles.find((p) => p.id === ME), role: db.viewAs };
       const n = new Map(); loadPhotos().forEach((ph) => n.set(ph.play_id, (n.get(ph.play_id) || 0) + 1));
-      return clone({ me, profiles: db.profiles.map((p) => (p.id === ME ? me : p)), players: db.players, games: db.games,
+      return clone({ group: groupInfo(), me, profiles: db.profiles.map((p) => (p.id === ME ? me : p)), players: db.players, games: db.games,
         plays: db.plays.map((p) => ({ ...p, photo_count: n.get(p.id) || 0 })) });
     },
 
     // Démo uniquement : basculer entre vue gestionnaire et vue joueur, réinitialiser.
     setViewAs(role) { db.viewAs = role; save(); },
-    reset() { localStorage.removeItem(KEY); localStorage.removeItem(PHOTO_KEY); load(); },
+    reset() {
+      reg.list.forEach((g) => localStorage.removeItem(keyOf(g.id)));
+      localStorage.removeItem(PHOTO_KEY); localStorage.removeItem(GROUPS_KEY);
+      reg = { current: "famille", list: DEMO_GROUPS.map((g) => ({ ...g })) }; load();
+    },
+
+    // ----- Groupes (v1.3.0) -----
+    async groups() {
+      return delay(reg.list.map((g) => {
+        const d = g.id === reg.current ? db : readDb(g.id);
+        return { id: g.id, name: g.name, emoji: g.emoji || "", owner: !!g.owner, role: d.viewAs === "admin" ? "admin" : "viewer", members: g.owner ? d.profiles.length : g.members || 2, current: g.id === reg.current };
+      }));
+    },
+    currentGroup: () => reg.current,
+    async useGroup(id) { if (!reg.list.some((g) => g.id === id)) throw new Error("Groupe introuvable"); reg.current = id; saveReg(); load(); },
+    async createGroup({ name, emoji = "" }) {
+      const id = uuid().slice(0, 8);
+      reg.list.push({ id, name: name.trim() || "Nouveau groupe", emoji, owner: true });
+      reg.current = id; saveReg(); load(); return id;
+    },
+    async saveGroupInfo({ name, emoji }) {
+      requireAdmin();
+      const g = reg.list.find((x) => x.id === reg.current);
+      if (name != null) g.name = name.trim() || g.name;
+      if (emoji != null) g.emoji = emoji;
+      saveReg(); return delay();
+    },
+    async leaveGroup() {
+      if (reg.list.length <= 1) throw new Error("Démo : garde au moins un groupe");
+      localStorage.removeItem(keyOf(reg.current));
+      reg.list = reg.list.filter((g) => g.id !== reg.current);
+      reg.current = reg.list[0].id; saveReg(); load();
+    },
+    // Données d'un autre groupe, en lecture (vue « Moi », copie de jeux).
+    async readGroup(id) {
+      const g = reg.list.find((x) => x.id === id);
+      const d = id === reg.current ? db : readDb(id);
+      return delay(clone({ id, name: g?.name || "", emoji: g?.emoji || "", players: d.players, games: d.games, plays: d.plays,
+        my_player_id: d.profiles.find((p) => p.id === ME)?.player_id || null }));
+    },
+    async setMyPlayer(playerId) { db.profiles.find((x) => x.id === ME).player_id = playerId || null; save(); return delay(); },
 
     async saveGame(game) {
       requireAdmin();

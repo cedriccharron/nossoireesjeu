@@ -36,6 +36,15 @@ Cédric a choisi de quitter Supabase pour **iCloud (CloudKit)**, sauf le relais 
 - **Méthode suivie** : export Supabase (`supabase/export.sql` → `export/*.csv`, vérifié par
   `supabase/verifier-export.mjs`) puis import dans iCloud. Supabase reste en service jusqu'au feu vert de Cédric.
 
+### Plusieurs groupes (v1.3.0, 26/11/2026)
+Une personne peut posséder et rejoindre **plusieurs groupes** (famille, collègues…). Chaque groupe = une zone CloudKit
+`CParty` (le premier, nom historique) ou `CParty-<id>`, partagée par son propre `CKShare` ; identifiant côté JS
+`<ownerName>|<zoneName>`, passé en `group` à chaque appel natif, groupe ouvert retenu dans `localStorage` (`cparty-group`).
+Nom + emoji du groupe dans un enregistrement `Group` (nom `group`, champ `json`) — **type à déployer en Production**.
+« C'est moi » (fiche joueur liée) : `Member` si gestionnaire, sinon retenu sur l'iPhone (`cparty-me`).
+Écrans : `#/groups` (liste, créer), `#/groups/new`, `#/me` (stats tous groupes, `myStats()`), `#/games/copy` (copie de jeux).
+Une partie appartient à un seul groupe ; stats/Elo par groupe ; seul le propriétaire d'un groupe invite.
+
 ### Interface « style A » (v1.2.0, 26/11/2026)
 Style iOS sobre choisi par Cédric : couleurs système (fond `#f2f2f7`, bleu `#007aff`, noir en sombre), listes groupées
 sans ombres, titres de section hors des cartes (`.sec-h`), avatars à initiales (`dot()` → `.av`), « + » dans l'en-tête

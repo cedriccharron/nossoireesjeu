@@ -1,0 +1,32 @@
+# Données de marché de l'app C-Patrimoine (Statbel + INSEE), publiées sur GitHub Pages :
+# https://cedriccharron.github.io/nossoireesjeu/c-patrimoine/market.json
+# L'app vérifie ce fichier une fois par semaine (et sur demande dans Plus).
+name: Données de marché C-Patrimoine
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"   # chaque lundi, 5 h 17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  marche:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Télécharger et calculer
+        run: python3 c-patrimoine/outils/import_indices.py --export-market /tmp/market.json
+      - name: Publier si les chiffres ont changé
+        run: |
+          if python3 c-patrimoine/outils/comparer_marche.py /tmp/market.json c-patrimoine/market.json; then
+            echo "Pas de nouvelles données."
+            exit 0
+          fi
+          cp /tmp/market.json c-patrimoine/market.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
+          git add c-patrimoine/market.json
+          git commit -m "C-Patrimoine : données de marché actualisées"
+          git push

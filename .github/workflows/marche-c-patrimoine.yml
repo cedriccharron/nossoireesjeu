@@ -1,7 +1,7 @@
-# Données de marché de l'app C-Patrimoine (Statbel + INSEE), publiées sur GitHub Pages :
+# Données de marché de l'app C-Immo (ex-C-Patrimoine) (Statbel + INSEE), publiées sur GitHub Pages :
 # https://cedriccharron.github.io/nossoireesjeu/c-patrimoine/market.json
 # L'app vérifie ce fichier une fois par semaine (et sur demande dans Plus).
-name: Données de marché C-Patrimoine
+name: Données de marché C-Immo
 
 on:
   schedule:
@@ -28,5 +28,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
           git add c-patrimoine/market.json
-          git commit -m "C-Patrimoine : données de marché actualisées"
+          git commit -m "C-Immo : données de marché actualisées"
           git push

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>C-Immo · Assistance</title>
+  <meta name="description" content="Aide et contact pour l'app C-Immo.">
+  <link rel="icon" href="icon-192.png" type="image/png">
+  <style>
+    :root { --bg: #f6f4ef; --ink: #1d1d1b; --muted: #6b6a66; --card: #ffffff; --accent: #1f6f54; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #151514; --ink: #f1efea; --muted: #a3a19b; --card: #1f1f1d; --accent: #5fbf98; } }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    main { max-width: 680px; margin: 0 auto; padding: 32px 16px 48px; }
+    header { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
+    header img { width: 56px; height: 56px; border-radius: 13px; }
+    h1 { font-size: 26px; margin: 0; }
+    h2 { font-size: 18px; margin: 28px 0 6px; }
+    p, li { color: var(--ink); }
+    .muted { color: var(--muted); font-size: 14px; }
+    section { background: var(--card); border-radius: 14px; padding: 4px 18px 14px; margin-top: 16px; }
+    a { color: var(--accent); }
+    ul { padding-left: 20px; }
+  </style>
+</head>
+<body>
+<main>
+  <header><img src="icon-192.png" alt=""><div><h1>Assistance</h1><div class="muted">C-Immo · votre patrimoine immobilier</div></div></header>
+
+  <p>C-Immo suit la valeur de vos biens immobiliers en Belgique et en France, vos prêts, vos travaux et vos loyers, seul ou en famille.</p>
+
+  <section>
+    <h2>Questions fréquentes</h2>
+    <p><strong>Comment commencer ?</strong><br>Touchez « Ajouter un bien », ou « Essayer avec un exemple » pour découvrir l'app avec deux biens fictifs (supprimez-les ensuite : fiche du bien → Modifier → Supprimer ce bien).</p>
+    <p><strong>Comment la valeur est-elle estimée ?</strong><br>À partir de votre prix d'achat (ou d'une estimation que vous ajoutez), on applique l'évolution des prix publiée par Statbel (Belgique) ou l'INSEE (France) pour votre zone et votre type de bien. Le détail est dans la fiche du bien, carte « Comment c'est calculé ». Les estimations sont indicatives et ne remplacent pas une expertise.</p>
+    <p><strong>Où sont mes données ?</strong><br>Sur votre iPhone et dans votre iCloud. Le développeur n'y a pas accès. Voir la <a href="confidentialite.html">politique de confidentialité</a>.</p>
+    <p><strong>Comment partager avec un proche ?</strong><br>Plus → Partage → « Inviter en consultation » ou « Inviter avec droit de modification ». La personne doit avoir C-Immo et son propre identifiant Apple.</p>
+    <p><strong>Comment sauvegarder ou changer d'iPhone ?</strong><br>Avec le même identifiant Apple, vos données reviennent seules depuis iCloud. Vous pouvez aussi créer un fichier : Plus → « Sauvegarder mes données », puis « Restaurer une sauvegarde » sur le nouvel appareil.</p>
+    <p><strong>« Mise à jour nécessaire » s'affiche</strong><br>Vos données ont été enregistrées par une version plus récente de C-Immo (sur un autre iPhone). Mettez l'app à jour depuis l'App Store.</p>
+    <p><strong>Comment tout supprimer ?</strong><br>Plus → « Supprimer toutes mes données » (efface l'iPhone et votre iCloud). Personne invitée : Plus → « Ne plus voir ce patrimoine ».</p>
+  </section>
+
+  <section>
+    <h2>Contact</h2>
+    <p>Une question, un problème ou une suggestion : <a href="https://github.com/cedriccharron/nossoireesjeu/issues/new?title=C-Immo%20%3A%20">ouvrez une demande ici</a> (compte GitHub gratuit). Merci d'indiquer la version de l'app (Plus → Sources → Version) et le modèle d'iPhone.</p>
+  </section>
+
+  <p class="muted">Sources des données de marché : Statbel (Belgique) et INSEE (France), données publiques.</p>
+</main>
+</body>
+</html>
